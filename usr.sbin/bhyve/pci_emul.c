@@ -99,9 +99,20 @@ static struct businfo *pci_businfo[MAXBUSES];
 SET_DECLARE(pci_devemu_set, struct pci_devemu);
 
 static uint64_t pci_emul_iobase;
+static uint64_t pci_emul_iolim;
 static uint64_t pci_emul_membase32;
+static uint64_t pci_emul_memlim32;
 static uint64_t pci_emul_membase64;
 static uint64_t pci_emul_memlim64;
+
+struct pcibarlist {
+	struct pci_devinst *pdi;
+	int idx;
+	enum pcibar_type type;
+	uint64_t size;
+	struct pcibarlist *next;
+};
+struct pcibarlist *pci_bars;
 
 #define	PCI_EMUL_IOBASE		0x2000
 #define	PCI_EMUL_IOLIMIT	0x10000
@@ -704,14 +715,11 @@ read_bar_value(struct pci_devinst *pi, int coff, int bytes)
 	return val;
 }
 
+/* add BAR to BAR-List */
 int
 pci_emul_alloc_bar(struct pci_devinst *pdi, int idx, enum pcibar_type type,
     uint64_t size)
 {
-	int error;
-	uint64_t *baseptr, limit, addr, mask, lobits, bar;
-	uint16_t cmd, enbit;
-
 	assert(idx >= 0 && idx <= PCI_BARMAX);
 
 	if ((size & (size - 1)) != 0)
@@ -726,6 +734,45 @@ pci_emul_alloc_bar(struct pci_devinst *pdi, int idx, enum pcibar_type type,
 			size = 16;
 	}
 
+	struct pcibarlist *newBar = malloc(sizeof(struct pcibarlist));
+	memset(newBar, 0, sizeof(struct pcibarlist));
+	newBar->pdi = pdi;
+	newBar->idx = idx;
+	newBar->type = type;
+	newBar->size = size;
+	if (pci_bars == NULL) {
+		/* first BAR */
+		pci_bars = newBar;
+	} else {
+		struct pcibarlist *bar = pci_bars;
+		struct pcibarlist *lastBar = NULL;
+		do {
+			if (bar->size < size)
+				break;
+			lastBar = bar;
+			bar = bar->next;
+		} while (bar != NULL);
+		newBar->next = bar;
+		if (lastBar != NULL)
+			lastBar->next = newBar;
+		else
+			pci_bars = newBar;
+	}
+	return (0);
+}
+
+static int
+pci_emul_assign_bar(struct pcibarlist *pci_bar)
+{
+	struct pci_devinst *pdi = pci_bar->pdi;
+	int idx = pci_bar->idx;
+	enum pcibar_type type = pci_bar->type;
+	uint64_t size = pci_bar->size;
+
+	int error;
+	uint64_t *baseptr, limit, addr, mask, lobits, bar;
+	uint16_t cmd, enbit;
+
 	switch (type) {
 	case PCIBAR_NONE:
 		baseptr = NULL;
@@ -733,7 +780,7 @@ pci_emul_alloc_bar(struct pci_devinst *pdi, int idx, enum pcibar_type type,
 		break;
 	case PCIBAR_IO:
 		baseptr = &pci_emul_iobase;
-		limit = PCI_EMUL_IOLIMIT;
+		limit = pci_emul_iolim;
 		mask = PCIM_BAR_IO_BASE;
 		lobits = PCIM_BAR_IO_SPACE;
 		enbit = PCIM_CMD_PORTEN;
@@ -754,7 +801,7 @@ pci_emul_alloc_bar(struct pci_devinst *pdi, int idx, enum pcibar_type type,
 				 PCIM_BAR_MEM_PREFETCH;
 		} else {
 			baseptr = &pci_emul_membase32;
-			limit = PCI_EMUL_MEMLIMIT32;
+			limit = pci_emul_memlim32;
 			mask = PCIM_BAR_MEM_BASE;
 			lobits = PCIM_BAR_MEM_SPACE | PCIM_BAR_MEM_64;
 		}
@@ -762,7 +809,7 @@ pci_emul_alloc_bar(struct pci_devinst *pdi, int idx, enum pcibar_type type,
 		break;
 	case PCIBAR_MEM32:
 		baseptr = &pci_emul_membase32;
-		limit = PCI_EMUL_MEMLIMIT32;
+		limit = pci_emul_memlim32;
 		mask = PCIM_BAR_MEM_BASE;
 		lobits = PCIM_BAR_MEM_SPACE | PCIM_BAR_MEM_32;
 		enbit = PCIM_CMD_MEMEN;
@@ -1233,7 +1280,10 @@ init_pci(struct vmctx *ctx)
 	int error;
 
 	pci_emul_iobase = PCI_EMUL_IOBASE;
+	pci_emul_iolim = PCI_EMUL_IOLIMIT;
+
 	pci_emul_membase32 = vm_get_lowmem_limit(ctx);
+	pci_emul_memlim32 = PCI_EMUL_MEMLIMIT32;
 
 	pci_emul_membase64 = 4*GB + vm_get_highmem_size(ctx);
 	pci_emul_membase64 = ALIGN_VALUE(pci_emul_membase64, PCI_EMUL_MEMSIZE64);
@@ -1255,6 +1305,7 @@ init_pci(struct vmctx *ctx)
 		bi->membase32 = pci_emul_membase32;
 		bi->membase64 = pci_emul_membase64;
 
+		// first run: init devices
 		for (slot = 0; slot < MAXSLOTS; slot++) {
 			si = &bi->slotinfo[slot];
 			for (func = 0; func < MAXFUNCS; func++) {
@@ -1292,6 +1343,15 @@ init_pci(struct vmctx *ctx)
 				if (error)
 					return (error);
 			}
+		}
+
+		// second run: assign BARs and free BAR list
+		struct pcibarlist *bar = pci_bars;
+		while (bar != NULL) {
+			pci_emul_assign_bar(bar);
+			struct pcibarlist *old = bar;
+			bar = bar->next;
+			free(old);
 		}
 
 		/*
