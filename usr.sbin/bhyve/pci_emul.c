@@ -595,8 +595,9 @@ memen(struct pci_devinst *pi)
  * the address range decoded by the BAR register.
  */
 static void
-update_bar_address(struct pci_devinst *pi, uint64_t addr, int idx, int type)
+update_bar_address(struct pci_devinst *pi, int idx, uint32_t val)
 {
+	int update_idx = idx;
 	int decode;
 
 	if (pi->pi_bar[idx].type == PCIBAR_IO)
@@ -604,28 +605,103 @@ update_bar_address(struct pci_devinst *pi, uint64_t addr, int idx, int type)
 	else
 		decode = memen(pi);
 
-	if (decode)
-		unregister_bar(pi, idx);
-
-	switch (type) {
+	switch (pi->pi_bar[idx].type) {
+	case PCIBAR_MEMHI64:
+		--update_idx;
 	case PCIBAR_IO:
 	case PCIBAR_MEM32:
-		pi->pi_bar[idx].addr = addr;
-		break;
 	case PCIBAR_MEM64:
-		pi->pi_bar[idx].addr &= ~0xffffffffUL;
-		pi->pi_bar[idx].addr |= addr;
+	{
+		struct pcibar *bar = &pi->pi_bar[update_idx];
+
+		if (decode && (bar->addr != 0))
+			unregister_bar(pi, update_idx);
+
+		if (val == ~0U) {
+			/* guest wants to read size of BAR */
+			pci_set_cfgdata32(pi, PCIR_BAR(idx), ~0U);
+			bar->addr = 0;
+			break;
+		}
+
+		/* guest sets address of BAR */
+		uint64_t mask;
+		uint32_t bar_val;
+		mask = ~(bar->size - 1UL);
+		if (pi->pi_bar[idx].type == PCIBAR_MEMHI64)
+			mask >>= 32UL;
+		bar_val = val & mask;
+		bar_val |= pi->pi_bar[idx].lobits;
+		pci_set_cfgdata32(pi, PCIR_BAR(idx), bar_val);
+
+		/* Only register BAR if it contains a valid address */
+		uint32_t lo, hi;
+		lo = pci_get_cfgdata32(pi, PCIR_BAR(update_idx));
+		hi = 0;
+		if (bar->type == PCIBAR_MEM64)
+			hi = pci_get_cfgdata32(pi, PCIR_BAR(update_idx + 1));
+		if (lo == ~0U || hi == ~0U) {
+			bar->addr = 0;
+			break;
+		}
+
+		if (bar->type == PCIBAR_IO)
+			lo &= PCIM_BAR_IO_BASE;
+		else
+			lo &= PCIM_BAR_MEM_BASE;
+		bar->addr = (uint64_t)lo | ((uint64_t)hi << 32UL);
+		if (decode)
+			register_bar(pi, update_idx);
+
 		break;
-	case PCIBAR_MEMHI64:
-		pi->pi_bar[idx].addr &= 0xffffffff;
-		pi->pi_bar[idx].addr |= addr;
+	}
+	case PCIBAR_NONE:
+		break;
+	default:
+		assert(0);
+	}
+}
+
+static uint32_t
+read_bar_value(struct pci_devinst *pi, int coff, int bytes)
+{
+	uint8_t idx;
+	idx = (coff - PCIR_BAR(0)) / 4;
+	assert(idx <= PCI_BARMAX);
+
+	uint8_t update_idx = idx;
+	uint64_t val;
+
+	if (pi->pi_bar[idx].type == PCIBAR_MEMHI64)
+		--update_idx;
+
+	val = pci_get_cfgdata32(pi, PCIR_BAR(idx));
+
+	/* return size of BAR */
+	if (val == ~0U) {
+		val = ~(pi->pi_bar[update_idx].size - 1);
+		val |= pi->pi_bar[update_idx].lobits;
+		if (pi->pi_bar[idx].type == PCIBAR_MEMHI64)
+			val >>= 32;
+	}
+
+	switch (bytes) {
+	case 1:
+		val = (val >> (8 * (coff & 0x03))) & 0xFF;
+		break;
+	case 2:
+		assert((coff & 0x01) == 0);
+		val = (val >> (8 * (coff & 0x02))) & 0xFFFF;
+		break;
+	case 4:
+		assert((coff & 0x03) == 0);
+		val = (uint32_t)val;
 		break;
 	default:
 		assert(0);
 	}
 
-	if (decode)
-		register_bar(pi, idx);
+	return val;
 }
 
 int
@@ -705,6 +781,13 @@ pci_emul_alloc_bar(struct pci_devinst *pdi, int idx, enum pcibar_type type,
 	pdi->pi_bar[idx].type = type;
 	pdi->pi_bar[idx].addr = addr;
 	pdi->pi_bar[idx].size = size;
+	/* passthru devices are using same lobits as physical device
+	 * they set this property
+	 */
+	if (pdi->pi_bar[idx].lobits != 0)
+		lobits = pdi->pi_bar[idx].lobits;
+	else
+		pdi->pi_bar[idx].lobits = lobits;
 
 	/* Initialize the BAR register in config space */
 	bar = (addr & mask) | lobits;
@@ -1855,7 +1938,6 @@ pci_cfgrw(struct vmctx *ctx, int vcpu, int in, int bus, int slot, int func,
 	struct pci_devinst *pi;
 	struct pci_devemu *pe;
 	int idx, needcfg;
-	uint64_t addr, bar, mask;
 
 	if ((bi = pci_businfo[bus]) != NULL) {
 		si = &bi->slotinfo[slot];
@@ -1907,8 +1989,13 @@ pci_cfgrw(struct vmctx *ctx, int vcpu, int in, int bus, int slot, int func,
 			needcfg = 1;
 		}
 
-		if (needcfg)
-			*eax = CFGREAD(pi, coff, bytes);
+		if (needcfg) {
+			if (coff >= PCIR_BAR(0) && coff < PCIR_BAR(PCI_BARMAX + 1)) {
+				*eax = read_bar_value(pi, coff, bytes);
+			} else {
+				*eax = CFGREAD(pi, coff, bytes);
+			}
+		}
 
 		pci_emul_hdrtype_fixup(bus, slot, coff, bytes, eax);
 	} else {
@@ -1927,55 +2014,10 @@ pci_cfgrw(struct vmctx *ctx, int vcpu, int in, int bus, int slot, int func,
 			 */
 			if (bytes != 4 || (coff & 0x3) != 0)
 				return;
-			idx = (coff - PCIR_BAR(0)) / 4;
-			mask = ~(pi->pi_bar[idx].size - 1);
-			switch (pi->pi_bar[idx].type) {
-			case PCIBAR_NONE:
-				pi->pi_bar[idx].addr = bar = 0;
-				break;
-			case PCIBAR_IO:
-				addr = *eax & mask;
-				addr &= 0xffff;
-				bar = addr | PCIM_BAR_IO_SPACE;
-				/*
-				 * Register the new BAR value for interception
-				 */
-				if (addr != pi->pi_bar[idx].addr) {
-					update_bar_address(pi, addr, idx,
-							   PCIBAR_IO);
-				}
-				break;
-			case PCIBAR_MEM32:
-				addr = bar = *eax & mask;
-				bar |= PCIM_BAR_MEM_SPACE | PCIM_BAR_MEM_32;
-				if (addr != pi->pi_bar[idx].addr) {
-					update_bar_address(pi, addr, idx,
-							   PCIBAR_MEM32);
-				}
-				break;
-			case PCIBAR_MEM64:
-				addr = bar = *eax & mask;
-				bar |= PCIM_BAR_MEM_SPACE | PCIM_BAR_MEM_64 |
-				       PCIM_BAR_MEM_PREFETCH;
-				if (addr != (uint32_t)pi->pi_bar[idx].addr) {
-					update_bar_address(pi, addr, idx,
-							   PCIBAR_MEM64);
-				}
-				break;
-			case PCIBAR_MEMHI64:
-				mask = ~(pi->pi_bar[idx - 1].size - 1);
-				addr = ((uint64_t)*eax << 32) & mask;
-				bar = addr >> 32;
-				if (bar != pi->pi_bar[idx - 1].addr >> 32) {
-					update_bar_address(pi, addr, idx - 1,
-							   PCIBAR_MEMHI64);
-				}
-				break;
-			default:
-				assert(0);
-			}
-			pci_set_cfgdata32(pi, coff, bar);
 
+			idx = (coff - PCIR_BAR(0)) / 4;
+
+			update_bar_address(pi, idx, *eax);
 		} else if (pci_emul_iscap(pi, coff)) {
 			pci_emul_capwrite(pi, coff, bytes, *eax, 0, 0);
 		} else if (coff >= PCIR_COMMAND && coff < PCIR_REVID) {

@@ -560,6 +560,16 @@ cfginitbar(struct vmctx *ctx, struct passthru_softc *sc)
 		sc->psc_bar[i].size = size;
 		sc->psc_bar[i].addr = base;
 
+		/* Use same lobits as physical bar */
+		uint8_t lobits = read_config(&sc->psc_sel, PCIR_BAR(i), 0x01);
+		if (bartype == PCIBAR_MEM32 || bartype == PCIBAR_MEM64) {
+			lobits &= ~PCIM_BAR_MEM_BASE;
+		} else {
+			lobits &= ~PCIM_BAR_IO_BASE;
+		}
+		sc->psc_bar[i].lobits = lobits;
+		pi->pi_bar[i].lobits = lobits;
+
 		/* Allocate the BAR in the guest I/O or MMIO space */
 		error = pci_emul_alloc_bar(pi, i, bartype, size);
 		if (error)
