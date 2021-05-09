@@ -1403,6 +1403,12 @@ main(int argc, char *argv[])
 
 	fbsdrun_set_capabilities(ctx, BSP);
 
+	/*
+	 * This function could potentially adjust lowmem_limit
+	 * Therefore, call this before vm_setup_memory
+	 */
+	pci_early_quirks(ctx);
+
 	memflags = 0;
 	if (get_config_bool_default("memory.wired", false))
 		memflags |= VM_MEM_F_WIRED;

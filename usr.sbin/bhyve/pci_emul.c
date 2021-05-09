@@ -70,6 +70,9 @@ __FBSDID("$FreeBSD$");
 
 #define GB		(1024 * 1024 * 1024UL)
 
+#define max(a, b) (((a) > (b)) ? (a) : (b))
+#define min(a, b) (((a) < (b)) ? (a) : (b))
+
 struct funcinfo {
 	nvlist_t *fi_config;
 	struct pci_devemu *fi_pde;
@@ -100,6 +103,8 @@ SET_DECLARE(pci_devemu_set, struct pci_devemu);
 
 static uint64_t pci_emul_iobase;
 static uint64_t pci_emul_iolim;
+static uint64_t pci_emul_gsmbase;
+static uint64_t pci_emul_gsmlim;
 static uint64_t pci_emul_membase32;
 static uint64_t pci_emul_memlim32;
 static uint64_t pci_emul_membase64;
@@ -121,6 +126,7 @@ struct pcibarlist *pci_bars;
 #define	PCI_EMUL_ECFG_SIZE	(MAXBUSES * 1024 * 1024)    /* 1MB per bus */
 SYSRES_MEM(PCI_EMUL_ECFG_BASE, PCI_EMUL_ECFG_SIZE);
 
+#define PCI_EMUL_MEMBASE32 0xC0000000
 #define	PCI_EMUL_MEMLIMIT32	PCI_EMUL_ECFG_BASE
 #define PCI_EMUL_MEMSIZE64	(32*GB)
 
@@ -521,6 +527,11 @@ modify_bar_registration(struct pci_devinst *pi, int idx, int registration)
 	struct mem_range mr;
 
 	pe = pi->pi_d;
+	if (pe->pe_baraddr != NULL &&
+	    (*pe->pe_baraddr)(
+		pi->pi_vmctx, pi, idx, registration, pi->pi_bar[idx].addr) == 0)
+		return;
+
 	switch (pi->pi_bar[idx].type) {
 	case PCIBAR_IO:
 		bzero(&iop, sizeof(struct inout_port));
@@ -534,9 +545,6 @@ modify_bar_registration(struct pci_devinst *pi, int idx, int registration)
 			error = register_inout(&iop);
 		} else
 			error = unregister_inout(&iop);
-		if (pe->pe_baraddr != NULL)
-			(*pe->pe_baraddr)(pi->pi_vmctx, pi, idx, registration,
-					  pi->pi_bar[idx].addr);
 		break;
 	case PCIBAR_MEM32:
 	case PCIBAR_MEM64:
@@ -552,9 +560,6 @@ modify_bar_registration(struct pci_devinst *pi, int idx, int registration)
 			error = register_mem(&mr);
 		} else
 			error = unregister_mem(&mr);
-		if (pe->pe_baraddr != NULL)
-			(*pe->pe_baraddr)(pi->pi_vmctx, pi, idx, registration,
-					  pi->pi_bar[idx].addr);
 		break;
 	default:
 		error = EINVAL;
@@ -770,7 +775,7 @@ pci_emul_assign_bar(struct pcibarlist *pci_bar)
 	uint64_t size = pci_bar->size;
 
 	int error;
-	uint64_t *baseptr, limit, addr, mask, lobits, bar;
+	uint64_t *baseptr, limit, addr, mask, lobits;
 	uint16_t cmd, enbit;
 
 	switch (type) {
@@ -791,22 +796,26 @@ pci_emul_assign_bar(struct pcibarlist *pci_bar)
 		 * Some drivers do not work well if the 64-bit BAR is allocated
 		 * above 4GB. Allow for this by allocating small requests under
 		 * 4GB unless then allocation size is larger than some arbitrary
-		 * number (128MB currently).
+		 * number (256MB currently).
 		 */
-		if (size > 128 * 1024 * 1024) {
+		if (size > 256 * 1024 * 1024) {
 			baseptr = &pci_emul_membase64;
 			limit = pci_emul_memlim64;
 			mask = PCIM_BAR_MEM_BASE;
 			lobits = PCIM_BAR_MEM_SPACE | PCIM_BAR_MEM_64 |
 				 PCIM_BAR_MEM_PREFETCH;
-		} else {
-			baseptr = &pci_emul_membase32;
-			limit = pci_emul_memlim32;
-			mask = PCIM_BAR_MEM_BASE;
-			lobits = PCIM_BAR_MEM_SPACE | PCIM_BAR_MEM_64;
+			enbit = PCIM_CMD_MEMEN;
+			break;
 		}
-		enbit = PCIM_CMD_MEMEN;
-		break;
+		/*
+		 * Use 32 bit BARs for small requests:
+		 * Fallthrough into MEM32 case
+		 */
+		type = PCIBAR_MEM32;
+		pdi->pi_bar[idx + 1].type = PCIBAR_NONE;
+		/* clear 64-bit flag */
+		pdi->pi_bar[idx].lobits &= ~PCIM_BAR_MEM_64;
+		/* [fallthrough] */
 	case PCIBAR_MEM32:
 		baseptr = &pci_emul_membase32;
 		limit = pci_emul_memlim32;
@@ -826,7 +835,7 @@ pci_emul_assign_bar(struct pcibarlist *pci_bar)
 	}
 
 	pdi->pi_bar[idx].type = type;
-	pdi->pi_bar[idx].addr = addr;
+	pdi->pi_bar[idx].addr = 0;
 	pdi->pi_bar[idx].size = size;
 	/* passthru devices are using same lobits as physical device
 	 * they set this property
@@ -836,22 +845,48 @@ pci_emul_assign_bar(struct pcibarlist *pci_bar)
 	else
 		pdi->pi_bar[idx].lobits = lobits;
 
-	/* Initialize the BAR register in config space */
-	bar = (addr & mask) | lobits;
-	pci_set_cfgdata32(pdi, PCIR_BAR(idx), bar);
-
-	if (type == PCIBAR_MEM64) {
-		assert(idx + 1 <= PCI_BARMAX);
-		pdi->pi_bar[idx + 1].type = PCIBAR_MEMHI64;
-		pci_set_cfgdata32(pdi, PCIR_BAR(idx + 1), bar >> 32);
-	}
-
+	/* Initialize CMD register in config space */
 	cmd = pci_get_cfgdata16(pdi, PCIR_COMMAND);
 	if ((cmd & enbit) != enbit)
 		pci_set_cfgdata16(pdi, PCIR_COMMAND, cmd | enbit);
-	register_bar(pdi, idx);
+
+	/* Initialize the BAR register in config space */
+	if (type == PCIBAR_MEM64) {
+		assert(idx + 1 <= PCI_BARMAX);
+		pdi->pi_bar[idx + 1].type = PCIBAR_MEMHI64;
+		update_bar_address(pdi, idx + 1, addr);
+	}
+
+	update_bar_address(pdi, idx, addr);
 
 	return (0);
+}
+
+#define ALIGNED_SUBTRACT(base, size) ((base - size) & ~(size - 1))
+
+int
+pci_emul_adjust_gsmbase(struct vmctx *ctx, uint64_t size)
+{
+	if (size > pci_emul_gsmbase)
+		return (-1);
+	pci_emul_gsmbase = ALIGNED_SUBTRACT(pci_emul_gsmbase, size);
+	vm_set_lowmem_limit(
+	    ctx, min(vm_get_lowmem_limit(ctx), pci_emul_gsmbase));
+
+	return (0);
+}
+
+uint64_t
+pci_emul_alloc_gsm(uint64_t size)
+{
+	if (size > pci_emul_gsmlim)
+		return 0;
+	uint64_t addr = ALIGNED_SUBTRACT(pci_emul_gsmlim, size);
+	if (addr < pci_emul_gsmbase)
+		return 0;
+	pci_emul_gsmlim = addr;
+
+	return addr;
 }
 
 #define	CAP_START_OFFSET	0x40
@@ -1259,10 +1294,50 @@ pci_ecfg_base(void)
 	return (PCI_EMUL_ECFG_BASE);
 }
 
+int
+pci_early_quirks(struct vmctx *ctx)
+{
+	pci_emul_gsmbase = PCI_EMUL_MEMBASE32;
+	pci_emul_gsmlim = PCI_EMUL_MEMBASE32;
+
+	for (int bus = 0; bus < MAXBUSES; ++bus) {
+		for (int slot = 0; slot < MAXSLOTS; ++slot) {
+			for (int func = 0; func < MAXFUNCS; ++func) {
+				char node_name[sizeof("pci.XXX.XX.X")];
+				snprintf(node_name, sizeof(node_name),
+				    "pci.%d.%d.%d", bus, slot, func);
+				nvlist_t *nvl = find_config_node(node_name);
+				if (nvl == NULL)
+					continue;
+
+				const char *emul = get_config_value_node(
+				    nvl, "device");
+				struct pci_devemu *pde = pci_emul_finddev(emul);
+				if (pde == NULL) {
+					EPRINTLN("pci slot %d:%d:%d: unknown "
+						 "device \"%s\"",
+					    bus, slot, func, emul);
+					return (EINVAL);
+				}
+
+				if (pde->pe_early_quirks) {
+					const int error = pde->pe_early_quirks(
+					    ctx, nvl);
+					if (error)
+						return (error);
+				}
+			}
+		}
+	}
+
+	return (0);
+}
+
 #define	BUSIO_ROUNDUP		32
 #define	BUSMEM_ROUNDUP		(1024 * 1024)
 
-#define ALIGN_VALUE(Value, Alignment)	((Value) + (((Alignment) - (Value)) & ((Alignment) - 1)))
+#define ALIGN_VALUE(Value, Alignment) \
+	((Value) + (((Alignment) - (Value)) & ((Alignment)-1)))
 
 int
 init_pci(struct vmctx *ctx)
@@ -1282,11 +1357,12 @@ init_pci(struct vmctx *ctx)
 	pci_emul_iobase = PCI_EMUL_IOBASE;
 	pci_emul_iolim = PCI_EMUL_IOLIMIT;
 
-	pci_emul_membase32 = vm_get_lowmem_limit(ctx);
+	pci_emul_membase32 = PCI_EMUL_MEMBASE32;
 	pci_emul_memlim32 = PCI_EMUL_MEMLIMIT32;
 
-	pci_emul_membase64 = 4*GB + vm_get_highmem_size(ctx);
-	pci_emul_membase64 = ALIGN_VALUE(pci_emul_membase64, PCI_EMUL_MEMSIZE64);
+	pci_emul_membase64 = 4 * GB + vm_get_highmem_size(ctx);
+	pci_emul_membase64 = ALIGN_VALUE(
+	    pci_emul_membase64, PCI_EMUL_MEMSIZE64);
 	pci_emul_memlim64 = pci_emul_membase64 + PCI_EMUL_MEMSIZE64;
 
 	for (bus = 0; bus < MAXBUSES; bus++) {
@@ -1305,7 +1381,7 @@ init_pci(struct vmctx *ctx)
 		bi->membase32 = pci_emul_membase32;
 		bi->membase64 = pci_emul_membase64;
 
-		// first run: init devices
+		/* first run: init devices */
 		for (slot = 0; slot < MAXSLOTS; slot++) {
 			si = &bi->slotinfo[slot];
 			for (func = 0; func < MAXFUNCS; func++) {
@@ -1345,7 +1421,7 @@ init_pci(struct vmctx *ctx)
 			}
 		}
 
-		// second run: assign BARs and free BAR list
+		/* second run: assign BARs and free BAR list */
 		struct pcibarlist *bar = pci_bars;
 		while (bar != NULL) {
 			pci_emul_assign_bar(bar);
@@ -1399,7 +1475,8 @@ init_pci(struct vmctx *ctx)
 	 * The guest physical memory map looks like the following:
 	 * [0,		    lowmem)		guest system memory
 	 * [lowmem,	    lowmem_limit)	memory hole (may be absent)
-	 * [lowmem_limit,   0xE0000000)		PCI hole (32-bit BAR allocation)
+	 * [lowmem_limit,   0xC0000000)		Graphics Stolen Memory (may be absent)
+	 * [0xC0000000,     0xE0000000)		PCI hole (32-bit BAR allocation)
 	 * [0xE0000000,	    0xF0000000)		PCI extended config window
 	 * [0xF0000000,	    4GB)		LAPIC, IOAPIC, HPET, firmware
 	 * [4GB,	    4GB + highmem)
@@ -2050,7 +2127,8 @@ pci_cfgrw(struct vmctx *ctx, int vcpu, int in, int bus, int slot, int func,
 		}
 
 		if (needcfg) {
-			if (coff >= PCIR_BAR(0) && coff < PCIR_BAR(PCI_BARMAX + 1)) {
+			if (coff >= PCIR_BAR(0) &&
+			    coff < PCIR_BAR(PCI_BARMAX + 1)) {
 				*eax = read_bar_value(pi, coff, bytes);
 			} else {
 				*eax = CFGREAD(pi, coff, bytes);
@@ -2076,7 +2154,6 @@ pci_cfgrw(struct vmctx *ctx, int vcpu, int in, int bus, int slot, int func,
 				return;
 
 			idx = (coff - PCIR_BAR(0)) / 4;
-
 			update_bar_address(pi, idx, *eax);
 		} else if (pci_emul_iscap(pi, coff)) {
 			pci_emul_capwrite(pi, coff, bytes, *eax, 0, 0);
