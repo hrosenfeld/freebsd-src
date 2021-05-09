@@ -51,6 +51,9 @@ struct vm_snapshot_meta;
 struct pci_devemu {
 	char      *pe_emu;		/* Name of device emulation */
 
+	/* quirks; especially used by GVT-d to adjust Top of Low Usable DRAM (lowmem_limit) */
+	int (*pe_early_quirks)(struct vmctx *, const nvlist_t *nvl);
+
 	/* instance creation */
 	int       (*pe_init)(struct vmctx *, struct pci_devinst *,
 			     nvlist_t *);
@@ -76,8 +79,8 @@ struct pci_devemu {
 				struct pci_devinst *pi, int baridx,
 				uint64_t offset, int size);
 
-	void	(*pe_baraddr)(struct vmctx *ctx, struct pci_devinst *pi,
-			      int baridx, int enabled, uint64_t address);
+	int (*pe_baraddr)(struct vmctx *ctx, struct pci_devinst *pi, int baridx,
+	    int enabled, uint64_t address);
 
 	/* Save/restore device state */
 	int	(*pe_snapshot)(struct vm_snapshot_meta *meta);
@@ -225,10 +228,13 @@ static_assert(sizeof(struct pciecap) == 60, "compile-time assertion failed");
 typedef void (*pci_lintr_cb)(int b, int s, int pin, int pirq_pin,
     int ioapic_irq, void *arg);
 
+int pci_early_quirks(struct vmctx *ctx);
 int	init_pci(struct vmctx *ctx);
 void	pci_callback(void);
 int	pci_emul_alloc_bar(struct pci_devinst *pdi, int idx,
 	    enum pcibar_type type, uint64_t size);
+int pci_emul_adjust_gsmbase(struct vmctx *ctx, uint64_t size);
+uint64_t pci_emul_alloc_gsm(uint64_t size);
 int	pci_emul_add_msicap(struct pci_devinst *pi, int msgnum);
 int	pci_emul_add_pciecap(struct pci_devinst *pi, int pcie_device_type);
 void	pci_emul_capwrite(struct pci_devinst *pi, int offset, int bytes,

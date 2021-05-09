@@ -217,15 +217,15 @@ pci_fbuf_read(struct vmctx *ctx, int vcpu, struct pci_devinst *pi,
 	return (value);
 }
 
-static void
+static int
 pci_fbuf_baraddr(struct vmctx *ctx, struct pci_devinst *pi, int baridx,
-		 int enabled, uint64_t address)
+    int enabled, uint64_t address)
 {
 	struct pci_fbuf_softc *sc;
 	int prot;
 
 	if (baridx != 1)
-		return;
+		return (-1);
 
 	sc = pi->pi_arg;
 	if (!enabled && sc->fbaddr != 0) {
@@ -238,6 +238,8 @@ pci_fbuf_baraddr(struct vmctx *ctx, struct pci_devinst *pi, int baridx,
 			warnx("pci_fbuf: mmap_memseg failed");
 		sc->fbaddr = address;
 	}
+
+	return (0);
 }
 
 
@@ -394,6 +396,13 @@ pci_fbuf_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
 	pci_set_cfgdata8(pi, PCIR_CLASS, PCIC_DISPLAY);
 	pci_set_cfgdata8(pi, PCIR_SUBCLASS, PCIS_DISPLAY_VGA);
 
+	sc->fb_base = vm_create_devmem(
+	    ctx, VM_FRAMEBUFFER, "framebuffer", FB_SIZE);
+	if (sc->fb_base == MAP_FAILED) {
+		error = -1;
+		goto done;
+	}
+
 	error = pci_emul_alloc_bar(pi, 0, PCIBAR_MEM32, DMEMSZ);
 	assert(error == 0);
 
@@ -403,7 +412,6 @@ pci_fbuf_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
 	error = pci_emul_add_msicap(pi, PCI_FBUF_MSI_MSGS);
 	assert(error == 0);
 
-	sc->fbaddr = pi->pi_bar[1].addr;
 	sc->memregs.fbsize = FB_SIZE;
 	sc->memregs.width  = COLS_DEFAULT;
 	sc->memregs.height = ROWS_DEFAULT;
@@ -424,11 +432,6 @@ pci_fbuf_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
 		goto done;
 	}
 
-	sc->fb_base = vm_create_devmem(ctx, VM_FRAMEBUFFER, "framebuffer", FB_SIZE);
-	if (sc->fb_base == MAP_FAILED) {
-		error = -1;
-		goto done;
-	}
 	DPRINTF(DEBUG_INFO, ("fbuf frame buffer base: %p [sz %lu]",
 	        sc->fb_base, FB_SIZE));
 

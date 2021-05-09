@@ -495,18 +495,22 @@ pci_lpc_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
 		}
 	}
 
-
 	if (read_config(&sel, PCIR_VENDOR, 2) == PCI_VENDOR_INTEL) {
 		/*
-		* The VID, DID, REVID, SUBVID and SUBDID of igd-lpc need aligned with
-		* physical one. Without these physical values, GVT-d GOP driver
-		* couldn't work.
-		*/
-		pci_set_cfgdata16(pi, PCIR_DEVICE, read_config(&sel, PCIR_DEVICE, 2));
-		pci_set_cfgdata16(pi, PCIR_VENDOR, read_config(&sel, PCIR_VENDOR, 2));
-		pci_set_cfgdata8(pi, PCIR_REVID, read_config(&sel, PCIR_REVID, 1));
-		pci_set_cfgdata16(pi, PCIR_SUBVEND_0, read_config(&sel, PCIR_SUBVEND_0, 2));
-		pci_set_cfgdata16(pi, PCIR_SUBDEV_0, read_config(&sel, PCIR_SUBDEV_0, 2));
+		 * The VID, DID, REVID, SUBVID and SUBDID of igd-lpc need to be
+		 * aligned with the physical ones. Without these physical
+		 * values, GVT-d GOP driver couldn't work.
+		 */
+		pci_set_cfgdata16(
+		    pi, PCIR_DEVICE, read_config(&sel, PCIR_DEVICE, 2));
+		pci_set_cfgdata16(
+		    pi, PCIR_VENDOR, read_config(&sel, PCIR_VENDOR, 2));
+		pci_set_cfgdata8(
+		    pi, PCIR_REVID, read_config(&sel, PCIR_REVID, 1));
+		pci_set_cfgdata16(
+		    pi, PCIR_SUBVEND_0, read_config(&sel, PCIR_SUBVEND_0, 2));
+		pci_set_cfgdata16(
+		    pi, PCIR_SUBDEV_0, read_config(&sel, PCIR_SUBDEV_0, 2));
 	}
 
 	lpc_bridge = pi;
