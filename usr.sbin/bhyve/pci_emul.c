@@ -35,6 +35,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/linker_set.h>
 
 #include <ctype.h>
+#include <err.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -561,6 +562,13 @@ modify_bar_registration(struct pci_devinst *pi, int idx, int registration)
 		} else
 			error = unregister_mem(&mr);
 		break;
+	case PCIBAR_ROM:
+		/* ROM emulation should be handled by pe_baraddr */
+		if (pi->pi_bar[idx].addr != 0)
+			error = EFAULT;
+		else
+			error = 0;
+		break;
 	default:
 		error = EINVAL;
 		break;
@@ -671,6 +679,30 @@ update_bar_address(struct pci_devinst *pi, int idx, uint32_t val)
 
 		break;
 	}
+	case PCIBAR_ROM: {
+		struct pcibar *bar = &pi->pi_bar[update_idx];
+
+		if (decode && bar->lobits && bar->addr)
+			unregister_bar(pi, idx);
+
+		pci_set_cfgdata32(pi, PCIR_BIOS, val);
+
+		/* Update enable bit */
+		bar->lobits = val & PCIM_BIOS_ENABLE;
+
+		/* Update ROM location */
+		if ((val & PCIM_BIOS_ADDR_MASK) == PCIM_BIOS_ADDR_MASK) {
+			/* guest wants to read size of ROM */
+			bar->addr = 0;
+		} else {
+			bar->addr = val & PCIM_BIOS_ADDR_MASK;
+		}
+
+		if (decode && bar->lobits && bar->addr)
+			register_bar(pi, idx);
+
+		break;
+	}
 	case PCIBAR_NONE:
 		break;
 	default:
@@ -682,16 +714,39 @@ static uint32_t
 read_bar_value(struct pci_devinst *pi, int coff, int bytes)
 {
 	uint8_t idx;
-	idx = (coff - PCIR_BAR(0)) / 4;
-	assert(idx <= PCI_BARMAX);
+	if (coff >= PCIR_BAR(0) && coff < PCIR_BAR(PCI_BARMAX + 1)) {
+		idx = (coff - PCIR_BAR(0)) / 4;
+	} else if (coff >= PCIR_BIOS && coff < PCIR_BIOS + 4) {
+		idx = PCI_BARMAX + 1;
+	} else {
+		warnx("%02x is no BAR", coff);
+		return 0;
+	}
 
 	uint8_t update_idx = idx;
 	uint64_t val;
 
-	if (pi->pi_bar[idx].type == PCIBAR_MEMHI64)
+	switch (pi->pi_bar[idx].type) {
+	case PCIBAR_MEMHI64:
 		--update_idx;
-
-	val = pci_get_cfgdata32(pi, PCIR_BAR(idx));
+		/* fallthrough */
+	case PCIBAR_IO:
+	case PCIBAR_MEM32:
+	case PCIBAR_MEM64:
+		val = pci_get_cfgdata32(pi, PCIR_BAR(idx));
+		break;
+	case PCIBAR_ROM:
+		val = pci_get_cfgdata32(pi, PCIR_BIOS);
+		/* check if size should be returned instead of address of ROM */
+		if ((val & PCIM_BIOS_ADDR_MASK) == PCIM_BIOS_ADDR_MASK)
+			val = ~0U;
+		break;
+	case PCIBAR_NONE:
+		return 0;
+	default:
+		warnx("%x is no valid BAR type", pi->pi_bar[idx].type);
+		return 0;
+	}
 
 	/* return size of BAR */
 	if (val == ~0U) {
@@ -717,7 +772,7 @@ read_bar_value(struct pci_devinst *pi, int coff, int bytes)
 		assert(0);
 	}
 
-	return val;
+        return (val);
 }
 
 /* add BAR to BAR-List */
@@ -725,18 +780,22 @@ int
 pci_emul_alloc_bar(struct pci_devinst *pdi, int idx, enum pcibar_type type,
     uint64_t size)
 {
-	assert(idx >= 0 && idx <= PCI_BARMAX);
+	if ((type != PCIBAR_ROM) && (idx < 0 || idx > PCI_BARMAX)) {
+		errx(4, "Illegal BAR idx");
+	} else if ((type == PCIBAR_ROM) && (idx != PCI_ROM_IDX)) {
+		errx(4, "Illegal ROM idx");
+	}
 
 	if ((size & (size - 1)) != 0)
 		size = 1UL << flsl(size);	/* round up to a power of 2 */
 
 	/* Enforce minimum BAR sizes required by the PCI standard */
 	if (type == PCIBAR_IO) {
-		if (size < 4)
-			size = 4;
+		size = max(size, 4);
+	} else if (type == PCIBAR_ROM) {
+		size = max(size, ~PCIM_BIOS_ADDR_MASK);
 	} else {
-		if (size < 16)
-			size = 16;
+		size = max(size, 16);
 	}
 
 	struct pcibarlist *newBar = malloc(sizeof(struct pcibarlist));
@@ -821,6 +880,14 @@ pci_emul_assign_bar(struct pcibarlist *pci_bar)
 		limit = pci_emul_memlim32;
 		mask = PCIM_BAR_MEM_BASE;
 		lobits = PCIM_BAR_MEM_SPACE | PCIM_BAR_MEM_32;
+		enbit = PCIM_CMD_MEMEN;
+		break;
+	case PCIBAR_ROM:
+		/* do not claim memory for ROM. OVMF will do it for us. */
+		baseptr = NULL;
+		limit = 0;
+		mask = PCIM_BIOS_ADDR_MASK;
+		lobits = 0;
 		enbit = PCIM_CMD_MEMEN;
 		break;
 	default:
@@ -2004,7 +2071,7 @@ pci_emul_cmd_changed(struct pci_devinst *pi, uint16_t old)
 	 * If the MMIO or I/O address space decoding has changed then
 	 * register/unregister all BARs that decode that address space.
 	 */
-	for (i = 0; i <= PCI_BARMAX; i++) {
+	for (i = 0; i <= PCI_BARMAX_WITH_ROM; i++) {
 		switch (pi->pi_bar[i].type) {
 			case PCIBAR_NONE:
 			case PCIBAR_MEMHI64:
@@ -2018,6 +2085,11 @@ pci_emul_cmd_changed(struct pci_devinst *pi, uint16_t old)
 						unregister_bar(pi, i);
 				}
 				break;
+			case PCIBAR_ROM:
+				/* skip (un-)register of ROM if it not enabled
+				 */
+				if (pi->pi_bar[i].lobits == 0)
+					break;
 			case PCIBAR_MEM32:
 			case PCIBAR_MEM64:
 				/* MMIO address space decoding changed? */
@@ -2127,8 +2199,9 @@ pci_cfgrw(struct vmctx *ctx, int vcpu, int in, int bus, int slot, int func,
 		}
 
 		if (needcfg) {
-			if (coff >= PCIR_BAR(0) &&
-			    coff < PCIR_BAR(PCI_BARMAX + 1)) {
+			if ((coff >= PCIR_BAR(0) &&
+				coff <= PCIR_BAR(PCI_BARMAX)) ||
+			    (coff >= PCIR_BIOS && coff < PCIR_BIOS + 4)) {
 				*eax = read_bar_value(pi, coff, bytes);
 			} else {
 				*eax = CFGREAD(pi, coff, bytes);
@@ -2143,17 +2216,24 @@ pci_cfgrw(struct vmctx *ctx, int vcpu, int in, int bus, int slot, int func,
 			return;
 
 		/*
-		 * Special handling for write to BAR registers
+		 * Special handling for write to BAR and ROM registers
 		 */
-		if (coff >= PCIR_BAR(0) && coff < PCIR_BAR(PCI_BARMAX + 1)) {
+		if ((coff >= PCIR_BAR(0) && coff <= PCIR_BAR(PCI_BARMAX)) ||
+		    (coff >= PCIR_BIOS && coff < PCIR_BIOS + 4)) {
 			/*
 			 * Ignore writes to BAR registers that are not
 			 * 4-byte aligned.
 			 */
 			if (bytes != 4 || (coff & 0x3) != 0)
 				return;
-
-			idx = (coff - PCIR_BAR(0)) / 4;
+			/*
+			 * coff is equal to PCIR_BIOS on ROM writes because
+			 * it's 4-byte aligned
+			 */
+			if (coff == PCIR_BIOS)
+				idx = PCI_ROM_IDX;
+			else
+				idx = (coff - PCIR_BAR(0)) / 4;
 			update_bar_address(pi, idx, *eax);
 		} else if (pci_emul_iscap(pi, coff)) {
 			pci_emul_capwrite(pi, coff, bytes, *eax, 0, 0);

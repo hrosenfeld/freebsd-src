@@ -43,6 +43,7 @@ SRCS=	\
 	pci_hda.c		\
 	pci_fbuf.c		\
 	pci_gvt-d.c		\
+	pci_gvt-d_amd.c		\
 	pci_hostbridge.c	\
 	pci_irq.c		\
 	pci_lpc.c		\

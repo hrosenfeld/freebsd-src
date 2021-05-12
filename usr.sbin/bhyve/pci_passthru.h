@@ -45,7 +45,8 @@ struct passthru_mmio_mapping {
 
 struct passthru_softc {
 	struct pci_devinst *psc_pi;
-	struct pcibar psc_bar[PCI_BARMAX + 1];
+	/* ROM is handled like a BAR */
+	struct pcibar psc_bar[PCI_BARMAX_WITH_ROM + 1];
 	struct {
 		int capoff;
 		int msgctrl;
@@ -71,17 +72,6 @@ struct passthru_softc {
 	    PPT_PCIR_PROT_WO) /* Read/Write access to physical values */
 #define PPT_PCIR_PROT_MASK 0x03
 
-#define GET_INT_CONFIG(var, name)                                           \
-	do {                                                                \
-		const char *value = get_config_value_node(nvl, name);       \
-		if (value == NULL) {                                        \
-			EPRINTLN(                                           \
-			    "passthru: missing required %s setting", name); \
-			return (1);                                         \
-		}                                                           \
-		var = atoi(value);                                          \
-	} while (0)
-
 int passthru_modify_pptdev_mmio(struct vmctx *ctx, struct passthru_softc *sc,
     struct passthru_mmio_mapping *map, int registration);
 uint32_t read_config(const struct pcisel *sel, long reg, int width);
@@ -91,3 +81,5 @@ int set_pcir_prot(
 int gvt_d_early_quirks(struct vmctx *ctx, struct pcisel *sel);
 int gvt_d_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl);
 void gvt_d_deinit(struct vmctx *ctx, struct pci_devinst *pi);
+int gvt_d_amd_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl);
+int gvt_d_amd_addr_rom(struct pci_devinst *pi, int idx, int enabled);

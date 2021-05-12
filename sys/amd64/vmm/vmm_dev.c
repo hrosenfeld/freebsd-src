@@ -60,6 +60,7 @@ __FBSDID("$FreeBSD$");
 #include <machine/vmm_snapshot.h>
 #include <x86/apicreg.h>
 
+#include "amd/amdgpu_bios.h"
 #include "vmm_lapic.h"
 #include "vmm_stat.h"
 #include "vmm_mem.h"
@@ -366,6 +367,7 @@ vmmdev_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 	struct vm_capability *vmcap;
 	struct vm_pptdev *pptdev;
 	struct vm_pptdev_mmio *pptmmio;
+	struct vm_vbios *vbios;
 	struct vm_pptdev_msi *pptmsi;
 	struct vm_pptdev_msix *pptmsix;
 	struct vm_nmi *vmnmi;
@@ -532,6 +534,13 @@ vmmdev_ioctl(struct cdev *cdev, u_long cmd, caddr_t data, int fflag,
 		pptmmio = (struct vm_pptdev_mmio *)data;
 		error = ppt_unmap_mmio(sc->vm, pptmmio->bus, pptmmio->slot,
 				       pptmmio->func, pptmmio->gpa, pptmmio->len);
+		break;
+	case VM_GET_VBIOS:
+		vbios = (struct vm_vbios *)data;
+		/* currently only amd cpus are supported */
+		error = vm_amdgpu_get_vbios(sc->vm, vbios->bus, vbios->slot,
+		    vbios->func, vbios->vendor, vbios->dev_id, vbios->bios,
+		    &vbios->size);
 		break;
 	case VM_BIND_PPTDEV:
 		pptdev = (struct vm_pptdev *)data;

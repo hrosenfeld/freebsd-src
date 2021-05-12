@@ -1013,6 +1013,30 @@ vm_unmap_pptdev_mmio(struct vmctx *ctx, int bus, int slot, int func,
 }
 
 int
+vm_get_vbios(struct vmctx *ctx, int bus, int slot, int func, uint16_t vendor,
+    uint16_t dev_id, void *bios, uint64_t *size)
+{
+	struct vm_vbios vbios;
+
+	bzero(&vbios, sizeof(vbios));
+	vbios.bus = bus;
+	vbios.slot = slot;
+	vbios.func = func;
+	vbios.vendor = vendor;
+	vbios.dev_id = dev_id;
+	vbios.bios = bios;
+	if (size != NULL)
+		vbios.size = *size;
+
+	const int error = ioctl(ctx->fd, VM_GET_VBIOS, &vbios);
+
+	if (size)
+		*size = vbios.size;
+
+	return (error);
+}
+
+int
 vm_setup_pptdev_msi(struct vmctx *ctx, int vcpu, int bus, int slot, int func,
     uint64_t addr, uint64_t msg, int numvec)
 {
@@ -1687,7 +1711,7 @@ vm_get_ioctls(size_t *len)
 	    VM_SET_CAPABILITY, VM_GET_CAPABILITY, VM_BIND_PPTDEV,
 	    VM_UNBIND_PPTDEV, VM_MAP_PPTDEV_MMIO, VM_PPTDEV_MSI,
 	    VM_PPTDEV_MSIX, VM_UNMAP_PPTDEV_MMIO, VM_PPTDEV_DISABLE_MSIX,
-	    VM_INJECT_NMI, VM_STATS, VM_STAT_DESC,
+	    VM_GET_VBIOS, VM_INJECT_NMI, VM_STATS, VM_STAT_DESC,
 	    VM_SET_X2APIC_STATE, VM_GET_X2APIC_STATE,
 	    VM_GET_HPET_CAPABILITIES, VM_GET_GPA_PMAP, VM_GLA2GPA,
 	    VM_GLA2GPA_NOFAULT,
