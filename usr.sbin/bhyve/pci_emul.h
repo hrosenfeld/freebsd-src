@@ -42,6 +42,8 @@
 #include <assert.h>
 
 #define	PCI_BARMAX	PCIR_MAX_BAR_0	/* BAR registers in a Type 0 header */
+#define PCI_BARMAX_WITH_ROM (PCI_BARMAX + 1)
+#define PCI_ROM_IDX (PCI_BARMAX + 1)
 
 struct vmctx;
 struct pci_devinst;
@@ -76,8 +78,8 @@ struct pci_devemu {
 				struct pci_devinst *pi, int baridx,
 				uint64_t offset, int size);
 
-	void	(*pe_baraddr)(struct vmctx *ctx, struct pci_devinst *pi,
-			      int baridx, int enabled, uint64_t address);
+	int (*pe_baraddr)(struct vmctx *ctx, struct pci_devinst *pi, int baridx,
+	    int enabled, uint64_t address);
 
 	/* Save/restore device state */
 	int	(*pe_snapshot)(struct vm_snapshot_meta *meta);
@@ -92,7 +94,8 @@ enum pcibar_type {
 	PCIBAR_IO,
 	PCIBAR_MEM32,
 	PCIBAR_MEM64,
-	PCIBAR_MEMHI64
+	PCIBAR_MEMHI64,
+	PCIBAR_ROM,
 };
 
 struct pcibar {
@@ -165,7 +168,8 @@ struct pci_devinst {
 	void      *pi_arg;		/* devemu-private data */
 
 	u_char	  pi_cfgdata[PCI_REGMAX + 1];
-	struct pcibar pi_bar[PCI_BARMAX + 1];
+	/* ROM is handled like a BAR */
+	struct pcibar pi_bar[PCI_BARMAX_WITH_ROM + 1];
 };
 
 struct msicap {

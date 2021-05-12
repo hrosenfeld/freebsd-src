@@ -58,6 +58,7 @@ SRCS+=	vmcb.c		\
 	svm_support.S	\
 	npt.c		\
 	ivrs_drv.c	\
+	amdgpu_bios.c	\
 	amdvi_hw.c	\
 	svm_msr.c
 

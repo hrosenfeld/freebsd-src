@@ -146,6 +146,16 @@ struct vm_pptdev_mmio {
 	size_t		len;
 };
 
+struct vm_vbios {
+	int bus;
+	int slot;
+	int func;
+	uint16_t vendor;
+	uint16_t dev_id;
+	void *bios;
+	uint64_t size;
+};
+
 struct vm_pptdev_msi {
 	int		vcpu;
 	int		bus;
@@ -309,6 +319,7 @@ enum {
 	IOCNUM_PPTDEV_MSIX = 44,
 	IOCNUM_PPTDEV_DISABLE_MSIX = 45,
 	IOCNUM_UNMAP_PPTDEV_MMIO = 46,
+	IOCNUM_GET_VBIOS = 47,
 
 	/* statistics */
 	IOCNUM_VM_STATS = 50, 
@@ -427,6 +438,8 @@ enum {
 	_IOW('v', IOCNUM_PPTDEV_DISABLE_MSIX, struct vm_pptdev)
 #define	VM_UNMAP_PPTDEV_MMIO \
 	_IOW('v', IOCNUM_UNMAP_PPTDEV_MMIO, struct vm_pptdev_mmio)
+#define VM_GET_VBIOS \
+	_IOWR('v', IOCNUM_GET_VBIOS, struct vm_vbios)
 #define VM_INJECT_NMI \
 	_IOW('v', IOCNUM_INJECT_NMI, struct vm_nmi)
 #define	VM_STATS \

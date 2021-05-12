@@ -73,6 +73,7 @@ enum {
 	VM_SYSMEM,
 	VM_BOOTROM,
 	VM_FRAMEBUFFER,
+	VM_VIDEOBIOS
 };
 
 /*
@@ -180,6 +181,8 @@ int	vm_map_pptdev_mmio(struct vmctx *ctx, int bus, int slot, int func,
 			   vm_paddr_t gpa, size_t len, vm_paddr_t hpa);
 int	vm_unmap_pptdev_mmio(struct vmctx *ctx, int bus, int slot, int func,
 			     vm_paddr_t gpa, size_t len);
+int vm_get_vbios(struct vmctx *ctx, int bus, int slot, int func,
+    uint16_t vendor, uint16_t dev_id, void *bios, uint64_t *size);
 int	vm_setup_pptdev_msi(struct vmctx *ctx, int vcpu, int bus, int slot,
 	    int func, uint64_t addr, uint64_t msg, int numvec);
 int	vm_setup_pptdev_msix(struct vmctx *ctx, int vcpu, int bus, int slot,
