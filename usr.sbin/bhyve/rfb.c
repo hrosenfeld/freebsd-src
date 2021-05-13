@@ -294,6 +294,8 @@ rfb_send_resize_update_msg(struct rfb_softc *rc, int cfd)
 	srect_hdr.height = htons(rc->height);
 	srect_hdr.encoding = htonl(RFB_ENCODING_RESIZE);
 	stream_write(cfd, &srect_hdr, sizeof(struct rfb_srvr_rect_hdr));
+
+	rc->pending = 0;
 }
 
 static void
@@ -493,6 +495,8 @@ rfb_send_all(struct rfb_softc *rc, int cfd, struct bhyvegc_image *gc)
 	                      sizeof(struct rfb_srvr_updt_msg));
 	if (nwrite <= 0)
 		return (nwrite);
+
+	rc->pending = 0;
 
 	/* Rectangle header */
 	srect_hdr.x = 0;
@@ -722,13 +726,13 @@ done:
 	return (retval);
 }
 
-
 static void
 rfb_recv_update_msg(struct rfb_softc *rc, int cfd)
 {
 	struct rfb_updt_msg updt_msg;
 
 	(void)stream_read(cfd, ((void *)&updt_msg) + 1 , sizeof(updt_msg) - 1);
+	rc->pending = 1;
 
 	if (rc->enc_extkeyevent_ok && (!rc->enc_extkeyevent_send)) {
 		rfb_send_extended_keyevent_update_msg(rc, cfd);

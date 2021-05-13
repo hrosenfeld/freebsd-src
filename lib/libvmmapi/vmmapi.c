@@ -61,8 +61,12 @@ __FBSDID("$FreeBSD$");
 
 #include "vmmapi.h"
 
+#define	KB	(1024UL)
 #define	MB	(1024 * 1024UL)
 #define	GB	(1024 * 1024 * 1024UL)
+
+#define	VGAMEM_START	(640*KB)
+#define	VGAMEM_END	(VGAMEM_START + 128*KB)
 
 /*
  * Size of the guard region before and after the virtual address space
@@ -86,6 +90,10 @@ struct vmctx {
 
 #define	CREATE(x)  sysctlbyname("hw.vmm.create", NULL, NULL, (x), strlen((x)))
 #define	DESTROY(x) sysctlbyname("hw.vmm.destroy", NULL, NULL, (x), strlen((x)))
+
+#ifndef min
+#define	min(a,b)	(((a) < (b)) ? (a) : (b))
+#endif
 
 static int
 vm_device_open(const char *name)
@@ -230,8 +238,10 @@ vm_mmap_memseg(struct vmctx *ctx, vm_paddr_t gpa, int segid, vm_ooffset_t off,
 	 */
 	error = vm_mmap_getnext(ctx, &gpa, &segid, &off, &len, &prot, &flags);
 	if (error == 0 && gpa == memmap.gpa) {
-		if (segid != memmap.segid || off != memmap.segoff ||
-		    prot != memmap.prot || flags != memmap.flags) {
+		/* Allow other segments to align with SYSMEM borders */
+		if ((segid != VM_SYSMEM || memmap.segid == VM_SYSMEM) &&
+		    (segid != memmap.segid || off != memmap.segoff ||
+		    prot != memmap.prot || flags != memmap.flags)) {
 			errno = EEXIST;
 			return (-1);
 		} else {
@@ -436,9 +446,23 @@ vm_setup_memory(struct vmctx *ctx, size_t memsize, enum vm_mmap_style vms)
 			return (error);
 	}
 
+	/*
+	 * Leave a memory hole for VGA memory.
+	 */
+	if (ctx->lowmem > VGAMEM_END) {
+		gpa = VGAMEM_END;
+		len = ctx->lowmem - VGAMEM_END;
+		error = setup_memory_segment(ctx, gpa, len, baseaddr);
+		if (error)
+			return (error);
+	}
+
+	/*
+	 * Add up to 640 KB of base memory.
+	 */
 	if (ctx->lowmem > 0) {
 		gpa = 0;
-		len = ctx->lowmem;
+		len = min(ctx->lowmem, VGAMEM_START);
 		error = setup_memory_segment(ctx, gpa, len, baseaddr);
 		if (error)
 			return (error);
@@ -462,7 +486,13 @@ vm_map_gpa(struct vmctx *ctx, vm_paddr_t gaddr, size_t len)
 
 	if (ctx->lowmem > 0) {
 		if (gaddr < ctx->lowmem && len <= ctx->lowmem &&
-		    gaddr + len <= ctx->lowmem)
+		    gaddr + len <= VGAMEM_START)
+			return (ctx->baseaddr + gaddr);
+	}
+
+	if (ctx->lowmem > VGAMEM_END) {
+		if (gaddr >= VGAMEM_END && gaddr < ctx->lowmem &&
+		    len <= ctx->lowmem && gaddr + len <= ctx->lowmem)
 			return (ctx->baseaddr + gaddr);
 	}
 
@@ -1379,10 +1409,6 @@ vm_gla2gpa_nofault(struct vmctx *ctx, int vcpu, struct vm_guest_paging *paging,
 	}
 	return (error);
 }
-
-#ifndef min
-#define	min(a,b)	(((a) < (b)) ? (a) : (b))
-#endif
 
 int
 vm_copy_setup(struct vmctx *ctx, int vcpu, struct vm_guest_paging *paging,

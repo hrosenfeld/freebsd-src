@@ -52,6 +52,7 @@
 #define	ATC_PALETTE15			15
 #define	ATC_MODE_CONTROL		16
 #define	ATC_MC_IPS			0x80	/* Internal palette size */
+#define	ATC_MC_ELG			0x04	/* Enable line graphics */
 #define	ATC_MC_GA			0x01	/* Graphics/alphanumeric */
 #define	ATC_OVERSCAN_COLOR		17
 #define	ATC_COLOR_PLANE_ENABLE		18

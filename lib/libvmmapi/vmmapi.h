@@ -41,7 +41,7 @@
  * API version for out-of-tree consumers like grub-bhyve for making compile
  * time decisions.
  */
-#define	VMMAPI_VERSION	0103	/* 2 digit major followed by 2 digit minor */
+#define	VMMAPI_VERSION	0104	/* 2 digit major followed by 2 digit minor */
 
 struct iovec;
 struct vmctx;
@@ -73,7 +73,8 @@ enum {
 	VM_SYSMEM,
 	VM_BOOTROM,
 	VM_FRAMEBUFFER,
-	VM_VIDEOBIOS
+	VM_VIDEOBIOS,
+	VM_NOTHING /* Last entry */
 };
 
 /*

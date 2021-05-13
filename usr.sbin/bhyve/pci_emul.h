@@ -239,6 +239,8 @@ int	pci_emul_alloc_bar(struct pci_devinst *pdi, int idx,
 	    enum pcibar_type type, uint64_t size);
 int pci_emul_adjust_gsmbase(struct vmctx *ctx, uint64_t size);
 uint64_t pci_emul_alloc_gsm(uint64_t size);
+int	pci_emul_alloc_rom(struct pci_devinst *pdi, int segid,
+	    uint32_t addr, uint32_t size);
 int	pci_emul_add_msicap(struct pci_devinst *pi, int msgnum);
 int	pci_emul_add_pciecap(struct pci_devinst *pi, int pcie_device_type);
 void	pci_emul_capwrite(struct pci_devinst *pi, int offset, int bytes,

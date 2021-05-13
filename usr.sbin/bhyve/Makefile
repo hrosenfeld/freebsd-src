@@ -84,6 +84,16 @@ SRCS+=	snapshot.c
 
 CFLAGS.kernemu_dev.c+=	-I${SRCTOP}/sys/amd64
 
+OBJS=	video_bios.bin
+
+CLEANFILES+=	video_bios.o
+
+video_bios.o: video_bios.h video_bios.t splash.S
+video_bios.bin: video_bios.o
+	$(LD) --script=${.CURDIR}/video_bios.lds ${.ALLSRC} -o ${.TARGET}
+	printf "\001" | dd of=${.TARGET} bs=1 seek=16 conv=notrunc 2> /dev/null
+	$(OBJCOPY) --strip-symbol=_start ${.TARGET}
+
 .PATH:  ${BHYVE_SYSDIR}/sys/amd64/vmm
 SRCS+=	vmm_instruction_emul.c
 
@@ -117,6 +127,7 @@ CFLAGS+=-DNO_OPENSSL
 LIBADD+=	crypto
 .endif
 
+CFLAGS+= -no-integrated-as
 CFLAGS+= -I${BHYVE_SYSDIR}/sys/dev/e1000
 CFLAGS+= -I${BHYVE_SYSDIR}/sys/dev/mii
 CFLAGS+= -I${BHYVE_SYSDIR}/sys/dev/usb/controller

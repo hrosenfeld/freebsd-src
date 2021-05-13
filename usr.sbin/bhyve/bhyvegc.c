@@ -69,10 +69,16 @@ bhyvegc_init(int width, int height, void *fbaddr)
 void
 bhyvegc_set_fbaddr(struct bhyvegc *gc, void *fbaddr)
 {
-	gc->raw = 1;
-	if (gc->gc_image->data && gc->gc_image->data != fbaddr)
+	if (!gc->raw && gc->gc_image->data && gc->gc_image->data != fbaddr)
 		free(gc->gc_image->data);
-	gc->gc_image->data = fbaddr;
+	if (fbaddr) {
+		gc->gc_image->data = fbaddr;
+		gc->raw = 1;
+	} else {
+		size_t size = gc->gc_image->width * gc->gc_image->height;
+		gc->gc_image->data = calloc(size, sizeof (uint32_t));
+		gc->raw = 0;
+	}
 }
 
 void

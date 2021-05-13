@@ -86,6 +86,20 @@ static int fbuf_debug = 1;
 #define COLS_MIN	640
 #define ROWS_MIN	480
 
+#define	FBUF_INDEX_PORT	0xfbfb
+#define	FBUF_DATA_PORT	0xfbfc
+
+#define	FBUF_REG_WIDTH		0x00
+#define	FBUF_REG_HEIGHT		0x01
+#define	FBUF_REG_DEPTH		0x02
+#define	FBUF_REG_SCANWIDTH	0x04
+
+extern uint8_t VideoBIOS[], VideoBIOS_end[];
+
+#define	BIOS_SIZE (VideoBIOS_end - VideoBIOS + 1)
+#define	BIOS_ADDR 0xC0000
+
+
 struct pci_fbuf_softc {
 	struct pci_devinst *fsc_pi;
 	struct {
@@ -94,8 +108,11 @@ struct pci_fbuf_softc {
 		uint16_t height;
 		uint16_t depth;
 		uint16_t refreshrate;
+		uint16_t scanwidth;
 		uint8_t  reserved[116];
 	} __packed memregs;
+
+	uint8_t   reg_index;
 
 	/* rfb server */
 	char      *rfb_host;
@@ -105,10 +122,14 @@ struct pci_fbuf_softc {
 	int       vga_enabled;
 	int	  vga_full;
 
+	/* Video BIOS */
+	uint8_t   *bios_base;
+
 	uint32_t  fbaddr;
 	char      *fb_base;
 	uint16_t  gc_width;
 	uint16_t  gc_height;
+	uint16_t  gc_depth;
 	void      *vgasc;
 	struct bhyvegc_image *gc_image;
 };
@@ -116,6 +137,35 @@ struct pci_fbuf_softc {
 static struct pci_fbuf_softc *fbuf_sc;
 
 #define	PCI_FBUF_MSI_MSGS	 4
+
+static void
+pci_fbuf_update_mode(struct pci_fbuf_softc *sc)
+{
+	/* Keep the config within reasonable limits */
+	sc->memregs.width = MIN(sc->memregs.width, COLS_MAX);
+	sc->memregs.height = MIN(sc->memregs.height, ROWS_MAX);
+	sc->memregs.depth = MIN(sc->memregs.depth, 32);
+	sc->memregs.scanwidth = MIN(sc->memregs.scanwidth, COLS_MAX);
+
+	if (!sc->gc_image->vgamode && (sc->memregs.width == 0 || 
+	    sc->memregs.height == 0 || sc->memregs.depth == 0)) {
+		DPRINTF(DEBUG_INFO, ("switching to VGA mode\r\n"));
+		sc->gc_image->vgamode = 1;
+		sc->gc_width = 0;
+		sc->gc_height = 0;
+		sc->gc_depth = 0;
+	} else if (sc->gc_image->vgamode && sc->memregs.width != 0 &&
+	    sc->memregs.height != 0 && sc->memregs.depth != 0) {
+		DPRINTF(DEBUG_INFO, ("switching to VESA mode\r\n"));
+		sc->gc_image->vgamode = 0;
+	}
+
+	/* Force an update in pci_fbuf_render */
+	if (!sc->gc_image->vgamode) {
+		sc->gc_width = 0xffff;
+		sc->gc_depth = 0xffff;
+	}
+}
 
 static void
 pci_fbuf_write(struct vmctx *ctx, int vcpu, struct pci_devinst *pi,
@@ -158,17 +208,7 @@ pci_fbuf_write(struct vmctx *ctx, int vcpu, struct pci_devinst *pi,
 		break;
 	}
 
-	if (!sc->gc_image->vgamode && sc->memregs.width == 0 &&
-	    sc->memregs.height == 0) {
-		DPRINTF(DEBUG_INFO, ("switching to VGA mode"));
-		sc->gc_image->vgamode = 1;
-		sc->gc_width = 0;
-		sc->gc_height = 0;
-	} else if (sc->gc_image->vgamode && sc->memregs.width != 0 &&
-	    sc->memregs.height != 0) {
-		DPRINTF(DEBUG_INFO, ("switching to VESA mode"));
-		sc->gc_image->vgamode = 0;
-	}
+	pci_fbuf_update_mode(sc);
 }
 
 uint64_t
@@ -218,25 +258,120 @@ pci_fbuf_read(struct vmctx *ctx, int vcpu, struct pci_devinst *pi,
 }
 
 static int
+pci_fbuf_handle_register(int in, void *reg, int size, uint32_t *eax, int bytes)
+{
+	void *source_data, *target_data;
+	int source_size, target_size;
+
+	source_data = in ? reg : eax;
+	source_size = in ? size : bytes;
+	target_data = in ? eax : reg;
+	target_size = in ? bytes : size;
+
+	switch (target_size) {
+	case 1: *(uint8_t*) target_data = 0; break;
+	case 2: *(uint16_t*)target_data = 0; break;
+	case 4: *(uint32_t*)target_data = 0; break;
+	default: assert(0); return (-1);
+	}
+
+	switch (MIN(source_size, target_size)) {
+	case 1: *(uint8_t*) target_data = *(uint8_t*) source_data; break;
+	case 2: *(uint16_t*)target_data = *(uint16_t*)source_data; break;
+	case 4: *(uint32_t*)target_data = *(uint32_t*)target_data; break;
+	default: assert(0); return (-1);
+	}
+
+	return (0);
+}
+
+static int
+pci_fbuf_port_handler(struct vmctx *ctx, int vcpu, int in, int port, int bytes,
+		      uint32_t *eax, void *arg)
+{
+	struct pci_fbuf_softc *sc;
+	int result;
+
+	result = 0;
+	sc = arg;
+
+	switch (port) {
+	case FBUF_INDEX_PORT:
+		return pci_fbuf_handle_register(
+		    in, &sc->reg_index, 1, eax, bytes);
+	case FBUF_DATA_PORT:
+		switch (sc->reg_index) {
+		case FBUF_REG_WIDTH:
+			result = pci_fbuf_handle_register(
+			    in, &sc->memregs.width, 2, eax, bytes);
+			break;
+		case FBUF_REG_HEIGHT:
+			result = pci_fbuf_handle_register(
+			    in, &sc->memregs.height, 2, eax, bytes);
+			break;
+		case FBUF_REG_DEPTH:
+			result = pci_fbuf_handle_register(
+			    in, &sc->memregs.depth, 2, eax, bytes);
+			break;
+		case FBUF_REG_SCANWIDTH:
+			result = pci_fbuf_handle_register(
+			    in, &sc->memregs.scanwidth, 2, eax, bytes);
+			break;
+		default:
+			fprintf(stderr, "pci_fbuf: unhandled register 0x%02x\n",
+			    sc->reg_index);
+			return (-1);
+		}
+		break;
+	default:
+		fprintf(stderr, "pci_fbuf: unhandled port 0x%04x\n", port);
+		return (-1);
+	}
+
+	pci_fbuf_update_mode(sc);
+
+	return (result);
+}
+
+static int
 pci_fbuf_baraddr(struct vmctx *ctx, struct pci_devinst *pi, int baridx,
     int enabled, uint64_t address)
 {
-	struct pci_fbuf_softc *sc;
+	struct pci_fbuf_softc *sc = pi->pi_arg;;
 	int prot;
 
-	if (baridx != 1)
-		return (-1);
+	switch (baridx) {
+	case 1:
+		if (!enabled && sc->fbaddr != 0) {
+			if (vm_munmap_memseg(ctx, sc->fbaddr, FB_SIZE) != 0)
+				warnx("pci_fbuf: munmap_memseg fb failed");
+			sc->fbaddr = 0;
+		} else if (sc->fb_base != NULL && sc->fbaddr == 0) {
+			prot = PROT_READ | PROT_WRITE;
+			if (vm_mmap_memseg(ctx, address, VM_FRAMEBUFFER, 0,
+			    FB_SIZE, prot) != 0)
+				warnx("pci_fbuf: mmap_memseg fb failed");
+			sc->fbaddr = address;
+		}
+		/* XXX: add call to vbios to determine fbaddr? */
+		*(uint32_t*)&sc->bios_base[0x14] = sc->fbaddr;
+		break;
 
-	sc = pi->pi_arg;
-	if (!enabled && sc->fbaddr != 0) {
-		if (vm_munmap_memseg(ctx, sc->fbaddr, FB_SIZE) != 0)
-			warnx("pci_fbuf: munmap_memseg failed");
-		sc->fbaddr = 0;
-	} else if (sc->fb_base != NULL && sc->fbaddr == 0) {
-		prot = PROT_READ | PROT_WRITE;
-		if (vm_mmap_memseg(ctx, address, VM_FRAMEBUFFER, 0, FB_SIZE, prot) != 0)
-			warnx("pci_fbuf: mmap_memseg failed");
-		sc->fbaddr = address;
+	case PCI_ROM_IDX:
+		if (!enabled) {
+			if (vm_munmap_memseg(ctx, BIOS_ADDR, BIOS_SIZE)
+			    != 0)
+				warnx("pci_fbuf: munmap_memseg fb failed");
+		} else {
+			assert(address == BIOS_ADDR);
+			if (vm_mmap_memseg(ctx, BIOS_ADDR, VM_VIDEOBIOS, 0,
+			    BIOS_SIZE, PROT_READ | PROT_EXEC) != 0)
+				warnx("pci_fbuf: mmap_memseg bios failed");
+		}
+		break;
+
+	default:
+		return (-1);
 	}
 
 	return (0);
@@ -348,6 +483,30 @@ pci_fbuf_parse_config(struct pci_fbuf_softc *sc, nvlist_t *nvl)
 	return (0);
 }
 
+static void
+pci_fbuf_copy_framebuffer(struct pci_fbuf_softc *sc)
+{
+	uint32_t scanwidth, source_index, target_index;
+	uint32_t x, y, pixel, size, mask;
+
+	scanwidth = MAX(sc->memregs.scanwidth, sc->gc_width);
+
+	if (sc->gc_depth == 0 ||
+	    (sc->gc_depth == 32 && scanwidth == sc->gc_width))
+		return;
+
+	size = (sc->gc_depth + 7) / 8;
+	mask = (1UL << sc->gc_depth) - 1;
+
+	for (y = 0; y < sc->gc_height; y++) {
+		for (x = 0; x < sc->gc_width; x++) {
+			source_index = y * scanwidth + x;
+			target_index = y * sc->gc_width + x;
+			pixel = *(uint32_t*)&sc->fb_base[source_index * size];
+			sc->gc_image->data[target_index] = pixel & mask;
+		}
+	}
+}
 
 extern void vga_render(struct bhyvegc *gc, void *arg);
 
@@ -362,6 +521,7 @@ pci_fbuf_render(struct bhyvegc *gc, void *arg)
 		/* TODO: mode switching to vga and vesa should use the special
 		 *      EFI-bhyve protocol port.
 		 */
+		sc->memregs.depth = 0;
 		vga_render(gc, sc->vgasc);
 		return;
 	}
@@ -371,8 +531,15 @@ pci_fbuf_render(struct bhyvegc *gc, void *arg)
 		sc->gc_width = sc->memregs.width;
 		sc->gc_height = sc->memregs.height;
 	}
+	if (sc->gc_depth != sc->memregs.depth) {
+		uint16_t scanwidth = MAX(sc->memregs.scanwidth, sc->gc_width);
+		int copy = sc->memregs.depth != 32 || scanwidth != sc->gc_width;
+		void *fb = (!copy)? sc->fb_base : NULL;
+		sc->gc_depth = sc->memregs.depth;
+		bhyvegc_set_fbaddr(gc, fb);
+	}
 
-	return;
+	pci_fbuf_copy_framebuffer(sc);
 }
 
 static int
@@ -380,6 +547,7 @@ pci_fbuf_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
 {
 	int error;
 	struct pci_fbuf_softc *sc;
+	struct inout_port iop;
 	
 	if (fbuf_sc != NULL) {
 		EPRINTLN("Only one frame buffer device is allowed.");
@@ -396,8 +564,8 @@ pci_fbuf_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
 	pci_set_cfgdata8(pi, PCIR_CLASS, PCIC_DISPLAY);
 	pci_set_cfgdata8(pi, PCIR_SUBCLASS, PCIS_DISPLAY_VGA);
 
-	sc->fb_base = vm_create_devmem(
-	    ctx, VM_FRAMEBUFFER, "framebuffer", FB_SIZE);
+	sc->fb_base = vm_create_devmem(ctx, VM_FRAMEBUFFER, "framebuffer",
+	    FB_SIZE);
 	if (sc->fb_base == MAP_FAILED) {
 		error = -1;
 		goto done;
@@ -409,13 +577,17 @@ pci_fbuf_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
 	error = pci_emul_alloc_bar(pi, 1, PCIBAR_MEM32, FB_SIZE);
 	assert(error == 0);
 
+	error = pci_emul_alloc_bar(pi, PCI_ROM_IDX, PCIBAR_ROM, BIOS_SIZE);
+	assert(error == 0);
+	pci_set_cfgdata32(pi, PCIR_BIOS, BIOS_ADDR);
+
 	error = pci_emul_add_msicap(pi, PCI_FBUF_MSI_MSGS);
 	assert(error == 0);
 
 	sc->memregs.fbsize = FB_SIZE;
 	sc->memregs.width  = COLS_DEFAULT;
 	sc->memregs.height = ROWS_DEFAULT;
-	sc->memregs.depth  = 32;
+	sc->memregs.depth  = 0;
 
 	sc->vga_enabled = 1;
 	sc->vga_full = 0;
@@ -426,17 +598,29 @@ pci_fbuf_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
 	if (error != 0)
 		goto done;
 
-	/* XXX until VGA rendering is enabled */
-	if (sc->vga_full != 0) {
-		EPRINTLN("pci_fbuf: VGA rendering not enabled");
-		goto done;
-	}
-
 	DPRINTF(DEBUG_INFO, ("fbuf frame buffer base: %p [sz %lu]",
 	        sc->fb_base, FB_SIZE));
 
 	console_init(sc->memregs.width, sc->memregs.height, sc->fb_base);
 	console_fb_register(pci_fbuf_render, sc);
+
+	iop.port = FBUF_INDEX_PORT;
+	iop.size = 2;
+	iop.flags = IOPORT_F_INOUT;
+	iop.handler = pci_fbuf_port_handler;
+	iop.arg = sc;
+
+	error = register_inout(&iop);
+	assert(error == 0);
+
+	sc->bios_base = vm_create_devmem(ctx, VM_VIDEOBIOS, "videobios", BIOS_SIZE);
+	if (sc->bios_base == MAP_FAILED) {
+		fprintf(stderr, "pci_fbuf: vm_create_devmem failed for BIOS\n");
+		error = -1;
+		goto done;
+	}
+
+	memcpy((void *)sc->bios_base, VideoBIOS, BIOS_SIZE);
 
 	if (sc->vga_enabled)
 		sc->vgasc = vga_init(!sc->vga_full);

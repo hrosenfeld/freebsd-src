@@ -258,8 +258,8 @@ vga_render_graphics(struct vga_softc *sc)
 static uint32_t
 vga_get_text_pixel(struct vga_softc *sc, int x, int y)
 {
-	int dots, offset, bit, font_offset;
-	uint8_t ch, attr, font;
+	int dots, offset, bit, elg, font_offset;
+	uint8_t ch, attr, font, cursor;
 	uint8_t idx;
 
 	dots = sc->vga_seq.seq_cm_dots;
@@ -267,17 +267,19 @@ vga_get_text_pixel(struct vga_softc *sc, int x, int y)
 	offset = 2 * sc->vga_crtc.crtc_start_addr;
 	offset += (y / 16 * sc->gc_width / dots) * 2 + (x / dots) * 2;
 
-	bit = 7 - (x % dots > 7 ? 7 : x % dots);
+	elg = (sc->vga_atc.atc_mode & ATC_MC_ELG) && ch >= 0xc0 && ch <= 0xdf;
+	bit = 7 - (x % dots);
+	if (bit < 0) bit = elg ? 0 : 8;
 
 	ch = sc->vga_ram[offset + 0 * 64*KB];
 	attr = sc->vga_ram[offset + 1 * 64*KB];
+	cursor = 0x00;
 
 	if (sc->vga_crtc.crtc_cursor_on &&
 	    (offset == (sc->vga_crtc.crtc_cursor_loc * 2)) &&
 	    ((y % 16) >= (sc->vga_crtc.crtc_cursor_start & CRTC_CS_CS)) &&
 	    ((y % 16) <= (sc->vga_crtc.crtc_cursor_end & CRTC_CE_CE))) {
-		idx = sc->vga_atc.atc_palette[attr & 0xf];
-		return (sc->vga_dac.dac_palette_rgb[idx]);
+		cursor = 0xff;
 	}
 
 	if ((sc->vga_seq.seq_mm & SEQ_MM_EM) &&
@@ -295,7 +297,7 @@ vga_get_text_pixel(struct vga_softc *sc, int x, int y)
 
 	font = sc->vga_ram[font_offset + 2 * 64*KB];
 
-	if (font & (1 << bit))
+	if ((font ^ cursor) & (1 << bit))
 		idx = sc->vga_atc.atc_palette[attr & 0xf];
 	else
 		idx = sc->vga_atc.atc_palette[attr >> 4];
@@ -452,8 +454,8 @@ vga_mem_wr_handler(struct vmctx *ctx, uint64_t addr, uint8_t val, void *arg1)
 		/* write mode 0 */
 		mask = sc->vga_gc.gc_bit_mask;
 
-		val = (val >> sc->vga_gc.gc_rotate) |
-		    (val << (8 - sc->vga_gc.gc_rotate));
+		val = (val >> (sc->vga_gc.gc_rotate & 0x07)) |
+		    (val << (8 - (sc->vga_gc.gc_rotate & 0x07)));
 
 		switch (sc->vga_gc.gc_op) {
 		case 0x00:		/* replace */
@@ -472,7 +474,7 @@ vga_mem_wr_handler(struct vmctx *ctx, uint64_t addr, uint8_t val, void *arg1)
 			c2 |= m2;
 			c3 |= m3;
 			break;
-		case 0x08:		/* AND */
+		case 0x01:		/* AND */
 			m0 = set_reset & 1 ? 0xff : ~mask;
 			m1 = set_reset & 2 ? 0xff : ~mask;
 			m2 = set_reset & 4 ? 0xff : ~mask;
@@ -483,7 +485,7 @@ vga_mem_wr_handler(struct vmctx *ctx, uint64_t addr, uint8_t val, void *arg1)
 			c2 = enb_set_reset & 4 ? c2 & m2 : val & m2;
 			c3 = enb_set_reset & 8 ? c3 & m3 : val & m3;
 			break;
-		case 0x10:		/* OR */
+		case 0x02:		/* OR */
 			m0 = set_reset & 1 ? mask : 0x00;
 			m1 = set_reset & 2 ? mask : 0x00;
 			m2 = set_reset & 4 ? mask : 0x00;
@@ -494,7 +496,7 @@ vga_mem_wr_handler(struct vmctx *ctx, uint64_t addr, uint8_t val, void *arg1)
 			c2 = enb_set_reset & 4 ? c2 | m2 : val | m2;
 			c3 = enb_set_reset & 8 ? c3 | m3 : val | m3;
 			break;
-		case 0x18:		/* XOR */
+		case 0x03:		/* XOR */
 			m0 = set_reset & 1 ? mask : 0x00;
 			m1 = set_reset & 2 ? mask : 0x00;
 			m2 = set_reset & 4 ? mask : 0x00;
@@ -531,7 +533,7 @@ vga_mem_wr_handler(struct vmctx *ctx, uint64_t addr, uint8_t val, void *arg1)
 			c2 |= m2;
 			c3 |= m3;
 			break;
-		case 0x08:		/* AND */
+		case 0x01:		/* AND */
 			m0 = (val & 1 ? 0xff : 0x00) | ~mask;
 			m1 = (val & 2 ? 0xff : 0x00) | ~mask;
 			m2 = (val & 4 ? 0xff : 0x00) | ~mask;
@@ -542,7 +544,7 @@ vga_mem_wr_handler(struct vmctx *ctx, uint64_t addr, uint8_t val, void *arg1)
 			c2 &= m2;
 			c3 &= m3;
 			break;
-		case 0x10:		/* OR */
+		case 0x02:		/* OR */
 			m0 = (val & 1 ? 0xff : 0x00) & mask;
 			m1 = (val & 2 ? 0xff : 0x00) & mask;
 			m2 = (val & 4 ? 0xff : 0x00) & mask;
@@ -553,7 +555,7 @@ vga_mem_wr_handler(struct vmctx *ctx, uint64_t addr, uint8_t val, void *arg1)
 			c2 |= m2;
 			c3 |= m3;
 			break;
-		case 0x18:		/* XOR */
+		case 0x03:		/* XOR */
 			m0 = (val & 1 ? 0xff : 0x00) & mask;
 			m1 = (val & 2 ? 0xff : 0x00) & mask;
 			m2 = (val & 4 ? 0xff : 0x00) & mask;
@@ -568,10 +570,10 @@ vga_mem_wr_handler(struct vmctx *ctx, uint64_t addr, uint8_t val, void *arg1)
 		break;
 	case 3:
 		/* write mode 3 */
-		mask = sc->vga_gc.gc_bit_mask & val;
+		val = (val >> (sc->vga_gc.gc_rotate & 0x07)) |
+		    (val << (8 - (sc->vga_gc.gc_rotate & 0x07)));
 
-		val = (val >> sc->vga_gc.gc_rotate) |
-		    (val << (8 - sc->vga_gc.gc_rotate));
+		mask = sc->vga_gc.gc_bit_mask & val;
 
 		switch (sc->vga_gc.gc_op) {
 		case 0x00:		/* replace */
@@ -590,7 +592,7 @@ vga_mem_wr_handler(struct vmctx *ctx, uint64_t addr, uint8_t val, void *arg1)
 			c2 |= m2;
 			c3 |= m3;
 			break;
-		case 0x08:		/* AND */
+		case 0x01:		/* AND */
 			m0 = (set_reset & 1 ? 0xff : 0x00) | ~mask;
 			m1 = (set_reset & 2 ? 0xff : 0x00) | ~mask;
 			m2 = (set_reset & 4 ? 0xff : 0x00) | ~mask;
@@ -601,7 +603,7 @@ vga_mem_wr_handler(struct vmctx *ctx, uint64_t addr, uint8_t val, void *arg1)
 			c2 &= m2;
 			c3 &= m3;
 			break;
-		case 0x10:		/* OR */
+		case 0x02:		/* OR */
 			m0 = (set_reset & 1 ? 0xff : 0x00) & mask;
 			m1 = (set_reset & 2 ? 0xff : 0x00) & mask;
 			m2 = (set_reset & 4 ? 0xff : 0x00) & mask;
@@ -612,7 +614,7 @@ vga_mem_wr_handler(struct vmctx *ctx, uint64_t addr, uint8_t val, void *arg1)
 			c2 |= m2;
 			c3 |= m3;
 			break;
-		case 0x18:		/* XOR */
+		case 0x03:		/* XOR */
 			m0 = (set_reset & 1 ? 0xff : 0x00) & mask;
 			m1 = (set_reset & 2 ? 0xff : 0x00) & mask;
 			m2 = (set_reset & 4 ? 0xff : 0x00) & mask;
@@ -1299,7 +1301,7 @@ vga_init(int io_only)
 	sc->mr.size = 128 * KB;
 	sc->mr.handler = vga_mem_handler;
 	sc->mr.arg1 = sc;
-	error = register_mem_fallback(&sc->mr);
+	error = register_mem(&sc->mr);
 	assert(error == 0);
 
 	sc->vga_ram = malloc(256 * KB);
