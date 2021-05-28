@@ -124,6 +124,7 @@ struct pci_fbuf_softc {
 
 	/* Video BIOS */
 	uint8_t   *bios_base;
+	uint32_t  biosaddr;
 
 	uint32_t  fbaddr;
 	char      *fb_base;
@@ -344,13 +345,13 @@ pci_fbuf_baraddr(struct vmctx *ctx, struct pci_devinst *pi, int baridx,
 	case 1:
 		if (!enabled && sc->fbaddr != 0) {
 			if (vm_munmap_memseg(ctx, sc->fbaddr, FB_SIZE) != 0)
-				warnx("pci_fbuf: munmap_memseg fb failed");
+				warn("pci_fbuf: munmap_memseg fb failed");
 			sc->fbaddr = 0;
-		} else if (sc->fb_base != NULL && sc->fbaddr == 0) {
+		} else if (enabled && sc->fb_base != NULL && sc->fbaddr == 0) {
 			prot = PROT_READ | PROT_WRITE;
 			if (vm_mmap_memseg(ctx, address, VM_FRAMEBUFFER, 0,
 			    FB_SIZE, prot) != 0)
-				warnx("pci_fbuf: mmap_memseg fb failed");
+				err(errno, "pci_fbuf: mmap_memseg fb failed");
 			sc->fbaddr = address;
 		}
 		/* XXX: add call to vbios to determine fbaddr? */
@@ -358,15 +359,16 @@ pci_fbuf_baraddr(struct vmctx *ctx, struct pci_devinst *pi, int baridx,
 		break;
 
 	case PCI_ROM_IDX:
-		if (!enabled) {
-			if (vm_munmap_memseg(ctx, BIOS_ADDR, BIOS_SIZE)
-			    != 0)
-				warnx("pci_fbuf: munmap_memseg fb failed");
-		} else {
-			assert(address == BIOS_ADDR);
-			if (vm_mmap_memseg(ctx, BIOS_ADDR, VM_VIDEOBIOS, 0,
+		if (!enabled && sc->biosaddr != 0) {
+			if (vm_munmap_memseg(ctx, sc->biosaddr, BIOS_SIZE) != 0)
+				warn("pci_fbuf: munmap_memseg bios failed");
+			sc->biosaddr = 0;
+		} else if (enabled && sc->biosaddr == 0) {
+			if (vm_mmap_memseg(ctx, address, VM_VIDEOBIOS, 0,
 			    BIOS_SIZE, PROT_READ | PROT_EXEC) != 0)
-				warnx("pci_fbuf: mmap_memseg bios failed");
+				err(errno, "pci_fbuf: mmap_memseg bios at "
+				    "0x%lx failed", address);
+			sc->biosaddr = address;
 		}
 		break;
 
