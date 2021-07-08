@@ -498,18 +498,17 @@ pci_emul_mem_handler(struct vmctx *ctx, int vcpu, int dir, uint64_t addr,
 
 
 static int
-pci_emul_alloc_resource(uint64_t *baseptr, uint64_t limit, uint64_t size,
+pci_emul_alloc_resource(uint64_t baseptr, uint64_t *limit, uint64_t size,
 			uint64_t *addr)
 {
 	uint64_t base;
 
 	assert((size & (size - 1)) == 0);	/* must be a power of 2 */
 
-	base = roundup2(*baseptr, size);
+	base = rounddown2(*limit - size, size);
 
-	if (base + size <= limit) {
-		*addr = base;
-		*baseptr = base + size;
+	if (base + size <= *limit) {
+		*addr = *limit = base;
 		return (0);
 	} else
 		return (-1);
@@ -834,17 +833,19 @@ pci_emul_assign_bar(struct pcibarlist *pci_bar)
 	uint64_t size = pci_bar->size;
 
 	int error;
-	uint64_t *baseptr, limit, addr, mask, lobits;
+	uint64_t *limit = NULL;
+	uint64_t baseptr, addr, mask, lobits;
 	uint16_t cmd, enbit;
 
 	switch (type) {
 	case PCIBAR_NONE:
-		baseptr = NULL;
+		baseptr = 0;
+		limit = NULL;
 		addr = mask = lobits = enbit = 0;
 		break;
 	case PCIBAR_IO:
-		baseptr = &pci_emul_iobase;
-		limit = pci_emul_iolim;
+		baseptr = pci_emul_iobase;
+		limit = &pci_emul_iolim;
 		mask = PCIM_BAR_IO_BASE;
 		lobits = PCIM_BAR_IO_SPACE;
 		enbit = PCIM_CMD_PORTEN;
@@ -858,8 +859,8 @@ pci_emul_assign_bar(struct pcibarlist *pci_bar)
 		 * number (256MB currently).
 		 */
 		if (size > 256 * 1024 * 1024) {
-			baseptr = &pci_emul_membase64;
-			limit = pci_emul_memlim64;
+			baseptr = pci_emul_membase64;
+			limit = &pci_emul_memlim64;
 			mask = PCIM_BAR_MEM_BASE;
 			lobits = PCIM_BAR_MEM_SPACE | PCIM_BAR_MEM_64 |
 				 PCIM_BAR_MEM_PREFETCH;
@@ -876,16 +877,16 @@ pci_emul_assign_bar(struct pcibarlist *pci_bar)
 		pdi->pi_bar[idx].lobits &= ~PCIM_BAR_MEM_64;
 		/* [fallthrough] */
 	case PCIBAR_MEM32:
-		baseptr = &pci_emul_membase32;
-		limit = pci_emul_memlim32;
+		baseptr = pci_emul_membase32;
+		limit = &pci_emul_memlim32;
 		mask = PCIM_BAR_MEM_BASE;
 		lobits = PCIM_BAR_MEM_SPACE | PCIM_BAR_MEM_32;
 		enbit = PCIM_CMD_MEMEN;
 		break;
 	case PCIBAR_ROM:
 		/* do not claim memory for ROM. OVMF will do it for us. */
-		baseptr = NULL;
-		limit = 0;
+		baseptr = 0;
+		limit = NULL;
 		mask = PCIM_BIOS_ADDR_MASK;
 		lobits = 0;
 		enbit = PCIM_CMD_MEMEN;
@@ -895,7 +896,7 @@ pci_emul_assign_bar(struct pcibarlist *pci_bar)
 		assert(0);
 	}
 
-	if (baseptr != NULL) {
+	if (limit != NULL) {
 		error = pci_emul_alloc_resource(baseptr, limit, size, &addr);
 		if (error != 0)
 			return (error);
