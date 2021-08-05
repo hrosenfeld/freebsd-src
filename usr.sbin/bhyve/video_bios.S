@@ -2320,7 +2320,9 @@ HandleVesaBiosExtension:
 	je	VBE_OemExtensions
 	cmp	$0x15, %al
 	je	VBE_DisplayDataChannel
-	jmp	NotImplemented
+	/* Not supported, return 0 in AL. */
+	xor	%al, %al
+	ret
 
 /*
  * INT 0x10, AH = 0x4f, AL = 0x00
