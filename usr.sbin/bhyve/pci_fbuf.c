@@ -355,10 +355,12 @@ pci_fbuf_baraddr(struct vmctx *ctx, struct pci_devinst *pi, int baridx,
 			sc->fbaddr = address;
 		}
 		/* XXX: add call to vbios to determine fbaddr? */
-		*(uint32_t*)&sc->bios_base[0x14] = sc->fbaddr;
+		if (sc->vga_enabled && sc->vga_full)
+			*(uint32_t*)&sc->bios_base[0x14] = sc->fbaddr;
 		break;
 
 	case PCI_ROM_IDX:
+		assert(sc->vga_enabled && sc->vga_full);
 		if (!enabled && sc->biosaddr != 0) {
 			if (vm_munmap_memseg(ctx, sc->biosaddr, BIOS_SIZE) != 0)
 				warn("pci_fbuf: munmap_memseg bios failed");
@@ -560,6 +562,20 @@ pci_fbuf_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
 
 	pi->pi_arg = sc;
 
+	sc->fsc_pi = pi;
+
+	sc->memregs.fbsize = FB_SIZE;
+	sc->memregs.width  = COLS_DEFAULT;
+	sc->memregs.height = ROWS_DEFAULT;
+	sc->memregs.depth  = 0;
+
+	sc->vga_enabled = 1;
+	sc->vga_full = 0;
+
+	error = pci_fbuf_parse_config(sc, nvl);
+	if (error != 0)
+		goto done;
+
 	/* initialize config space */
 	pci_set_cfgdata16(pi, PCIR_DEVICE, 0x40FB);
 	pci_set_cfgdata16(pi, PCIR_VENDOR, 0xFB5D);
@@ -579,26 +595,28 @@ pci_fbuf_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
 	error = pci_emul_alloc_bar(pi, 1, PCIBAR_MEM32, FB_SIZE);
 	assert(error == 0);
 
-	error = pci_emul_alloc_bar(pi, PCI_ROM_IDX, PCIBAR_ROM, BIOS_SIZE);
-	assert(error == 0);
-	pci_set_cfgdata32(pi, PCIR_BIOS, BIOS_ADDR);
+	/*
+	 * Only use VBIOS if we're providing full VGA.
+	 */
+	if (sc->vga_enabled && sc->vga_full) {
+		error = pci_emul_alloc_bar(pi, PCI_ROM_IDX, PCIBAR_ROM,
+		    BIOS_SIZE);
+		assert(error == 0);
+		pci_set_cfgdata32(pi, PCIR_BIOS, BIOS_ADDR);
+
+		sc->bios_base = vm_create_devmem(ctx, VM_VIDEOBIOS, "videobios",
+		    BIOS_SIZE);
+		if (sc->bios_base == MAP_FAILED) {
+			warn("pci_fbuf: vm_create_devmem failed for BIOS");
+			error = -1;
+			goto done;
+		}
+
+		memcpy((void *)sc->bios_base, VideoBIOS, BIOS_SIZE);
+	}
 
 	error = pci_emul_add_msicap(pi, PCI_FBUF_MSI_MSGS);
 	assert(error == 0);
-
-	sc->memregs.fbsize = FB_SIZE;
-	sc->memregs.width  = COLS_DEFAULT;
-	sc->memregs.height = ROWS_DEFAULT;
-	sc->memregs.depth  = 0;
-
-	sc->vga_enabled = 1;
-	sc->vga_full = 0;
-
-	sc->fsc_pi = pi;
-
-	error = pci_fbuf_parse_config(sc, nvl);
-	if (error != 0)
-		goto done;
 
 	DPRINTF(DEBUG_INFO, ("fbuf frame buffer base: %p [sz %lu]",
 	        sc->fb_base, FB_SIZE));
@@ -614,15 +632,6 @@ pci_fbuf_init(struct vmctx *ctx, struct pci_devinst *pi, nvlist_t *nvl)
 
 	error = register_inout(&iop);
 	assert(error == 0);
-
-	sc->bios_base = vm_create_devmem(ctx, VM_VIDEOBIOS, "videobios", BIOS_SIZE);
-	if (sc->bios_base == MAP_FAILED) {
-		fprintf(stderr, "pci_fbuf: vm_create_devmem failed for BIOS\n");
-		error = -1;
-		goto done;
-	}
-
-	memcpy((void *)sc->bios_base, VideoBIOS, BIOS_SIZE);
 
 	if (sc->vga_enabled)
 		sc->vgasc = vga_init(!sc->vga_full);
