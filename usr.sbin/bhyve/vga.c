@@ -655,6 +655,21 @@ vga_mem_wr_handler(struct vmctx *ctx, uint64_t addr, uint8_t val, void *arg1)
 }
 
 static int
+vga_mem_dummy_handler(struct vmctx *ctx, int vcpu, int dir, uint64_t addr,
+		      int size, uint64_t *val, void *arg1, long arg2)
+{
+	/*
+	 * Ignore writes; return 0xff's for reads. The mem read code
+	 * will take care of truncating to the correct size.
+	 */
+	if (dir == MEM_F_READ) {
+		*val = 0xffffffffffffffff;
+	}
+
+	return (0);
+}
+
+static int
 vga_mem_handler(struct vmctx *ctx, int vcpu, int dir, uint64_t addr,
 		int size, uint64_t *val, void *arg1, long arg2)
 {
@@ -1291,16 +1306,26 @@ vga_init(int io_only)
 
 	sc->gc_image = console_get_image();
 
-	/* only handle io ports; vga graphics is disabled */
-	if (io_only)
-		return(sc);
-
 	sc->mr.name = "VGA memory";
 	sc->mr.flags = MEM_F_RW;
 	sc->mr.base = 640 * KB;
 	sc->mr.size = 128 * KB;
-	sc->mr.handler = vga_mem_handler;
 	sc->mr.arg1 = sc;
+
+	/*
+	 * Only handle io ports, vga graphics is disabled. Register a dummy
+	 * memory range ignoring writes and returning 0xff on reads for the
+	 * benefit of existing code that accesses VGA memory anyway.
+	 */
+	if (io_only) {
+		sc->mr.handler = vga_mem_dummy_handler;
+		error = register_mem_fallback(&sc->mr);
+		assert(error == 0);
+
+		return(sc);
+	}
+
+	sc->mr.handler = vga_mem_handler;
 	error = register_mem(&sc->mr);
 	assert(error == 0);
 
