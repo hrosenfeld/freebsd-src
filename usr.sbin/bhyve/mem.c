@@ -366,11 +366,37 @@ unregister_mem(struct mem_range *memp)
 	return (err);
 }
 
+static int
+mem_dummy_handler(struct vmctx *ctx, int vcpu, int dir, uint64_t addr,
+		  int size, uint64_t *val, void *arg1, long arg2)
+{
+	/*
+	 * Ignore writes; return 0xff's for reads. The mem read code
+	 * will take care of truncating to the correct size.
+	 */
+	if (dir == MEM_F_READ) {
+		*val = 0xffffffffffffffff;
+	}
+
+	return (0);
+}
+
 void
 init_mem(void)
 {
+	static struct mem_range dummy_mr;
 
 	RB_INIT(&mmio_rb_root);
 	RB_INIT(&mmio_rb_fallback);
 	pthread_rwlock_init(&mmio_rwlock, NULL);
+
+	dummy_mr.name = "dummy fallback";
+	dummy_mr.flags = MEM_F_RW | MEM_F_IMMUTABLE;
+	dummy_mr.base = 0;
+	dummy_mr.size = 0xffffffffffffffff;
+	dummy_mr.arg1 = NULL;
+	dummy_mr.arg2 = 0;
+	dummy_mr.handler = mem_dummy_handler;
+
+	assert(register_mem_fallback(&dummy_mr) == 0);
 }
