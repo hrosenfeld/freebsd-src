@@ -575,7 +575,8 @@ ModeInfoBlock:
  * (value) and shifts the result (shift) bits left to fill a wanted position.
  */
 #define	CHROMA_BITS(value, index, count, shift) \
-    (((value * (1 << index) / 10000) & ((1 << count) - 1)) << shift)
+    (((((value * (1 << 10) + 5000) / 10000) >> (10 - index)) & \
+	((1 << count) - 1)) << shift)
 
 /* They had to squeeze these into single bytes... */
 #define	X_RES(value)	( (value) / 8 - 31 )
@@ -597,7 +598,7 @@ DisplayData:
 .word	EdidVendorId('B', 'S', 'D')	# VendorID (BSD)
 .word	0xfbfb				# ProductID (FreeBSD Framebuffer)
 .long	0xffffffff			# No serial number
-.byte	15, 29				# Made in week 15 of year 2019
+.byte	35, 31				# Made in week 15 of year 2019
 .byte	1, 3				# EDID version 1.3
 .byte	0xa0				# Digital input; 8 bits/color
 .byte	51, 29				# 51 x 29 cm; that's my monitor
@@ -636,9 +637,9 @@ DisplayData:
 .byte	0x02, 0x3a, 0x80, 0x18, 0x71, 0x38, 0x2d, 0x40, 0x58
 .byte	0x2c, 0x45, 0x00, 0xfe, 0x1f, 0x11, 0x00, 0x00, 0x1e
 
-/* Limits: 56-76 Hz vertical, 31-83 kHz horizontal, 170 MHz pixel clock */
-.byte	0x00, 0x00, 0x00, 0xfd, 0x00,   56,   76,   31,   83
-.byte	  17, 0x00, 0x0a, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20
+/* Limits: 56-120 Hz vertical, 31-95 kHz horizontal, 250 MHz pixel clock */
+.byte	0x00, 0x00, 0x00, 0xfd, 0x00,   56,  120,   31,   95
+.byte	  25, 0x00, 0x0a, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20
 
 /* Monitor Name: "VNC1" */
 .byte	0x00, 0x00, 0x00, 0xfc, 0x00,  'V',  'N',  'C', '1'
