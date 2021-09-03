@@ -134,6 +134,39 @@
 #endif
 .endm
 
+.macro	PrintByte Byte
+	mov	$STR_\Byte, %ax
+	call	PrintString
+	mov	\Byte, %al
+	call	PrintAlRegister
+	mov	$STR_EOL, %ax
+	call	PrintString
+.endm
+
+.macro	PrintWord Word
+	mov	$STR_\Word, %ax
+	call	PrintString
+	mov	\Word, %ax
+	call	PrintAxRegister
+	mov	$STR_EOL, %ax
+	call	PrintString
+.endm
+
+.macro	PrintCursors Word
+	mov	$STR_\Word, %ax
+	call	PrintString
+	xor	%bx, %bx
+	mov	$8, %cx
+\@:	mov	\Word(%bx), %ax
+	call	PrintAxRegister
+	print	' '
+	inc	%bx
+	inc	%bx
+	loop	\@b
+	mov	$STR_EOL, %ax
+	call	PrintString
+.endm
+
 .macro JmpNotImplemented Text
 	push	%ax
 	mov	$\@f, %ax
@@ -704,6 +737,32 @@ STR_FAILED:
 .asciz	"Failed!\r\n"
 STR_GOT_HERE:
 .asciz	"Got here!\r\n"
+STR_VCDA1:
+.asciz	"Video Control Data Area 1:\r\n"
+STR_VCDA2:
+.asciz	"Video Control Data Area 2:\r\n"
+
+.macro	String Label, Text
+STR_\Label:
+.asciz	"\Text"
+.endm
+
+String	BDA_DISPLAY_MODE,	"Current Video Mode:  "
+String	BDA_NUMBER_OF_COLUMNS,	"Numer of Columns:    "
+String	BDA_VIDEO_PAGE_SIZE,	"Video Page Size:     "
+String	BDA_VIDEO_PAGE_OFFSET,	"Video Page Offset:   "
+String	BDA_CURSOR_POSITIONS,	"Cursor Positions:    "
+String	BDA_CURSOR_TYPE,	"Cursor Type:         "
+String	BDA_DISPLAY_PAGE,	"Active Display Page: "
+String	BDA_CRTC_BASE,		"CRTC Base I/O Port:  "
+String	BDA_3X8_SETTING,	"3x8h I/O Port Value: "
+String	BDA_3X9_SETTING,	"3x9h I/O Port Value: "
+String	BDA_LAST_ROW_INDEX,	"Last Row Index:      "
+String	BDA_CHARACTER_HEIGHT,	"Character Height:    "
+String	BDA_VIDEO_MODE_OPTIONS,	"Video Mode Options:  "
+String	BDA_VIDEO_FEATURE_BITS,	"EGA Feature Bits:    "
+String	BDA_VIDEO_DISPLAY_DATA,	"Video Display Data:  "
+String	BDA_DCC_TABLE_INDEX,	"DCC Table Index:     "
 
 /*** Functions ****************************************************************/
 
@@ -6132,6 +6191,21 @@ PrintEndOfLine:
 	ret
 
 /*
+ * Prints the 8-bit AL register as a hexadecimal number.
+ */
+PrintAlRegister:
+	PushSet	%ax, %bx, %cx
+
+	/* Load the arguments */
+	xor	%bx, %bx
+	mov	%al, %bh
+
+	/* Loop over two nybbles and output hexadecimal */
+	mov	$2, %cx		# Rotate left four times
+
+	jmp	0f
+
+/*
  * Prints the 16-bit AX register as a hexadecimal number.
  */
 PrintAxRegister:
@@ -6337,6 +6411,41 @@ PrintDebugHeader:
 	ret
 
 /*
+ * Print the Video Control Data Area from the BIOS Data Area
+ */
+PrintVideoControlDataArea:
+	PushSet	%ax, %bx, %cx
+
+	/* Print the Video Control Data Area 1 */
+	mov	$STR_VCDA1, %ax
+	call	PrintString
+
+	PrintByte	BDA_DISPLAY_MODE
+	PrintWord	BDA_NUMBER_OF_COLUMNS
+	PrintWord	BDA_VIDEO_PAGE_SIZE
+	PrintWord	BDA_VIDEO_PAGE_OFFSET
+	PrintCursors	BDA_CURSOR_POSITIONS
+	PrintWord	BDA_CURSOR_TYPE
+	PrintByte	BDA_DISPLAY_PAGE
+	PrintWord	BDA_CRTC_BASE
+	PrintByte	BDA_3X8_SETTING
+	PrintByte	BDA_3X9_SETTING
+
+	/* Print the Video Control Data Area 2 */
+	mov	$STR_VCDA2, %ax
+	call	PrintString
+
+	PrintByte	BDA_LAST_ROW_INDEX
+	PrintWord	BDA_CHARACTER_HEIGHT
+	PrintByte	BDA_VIDEO_MODE_OPTIONS
+	PrintByte	BDA_VIDEO_FEATURE_BITS
+	PrintByte	BDA_VIDEO_DISPLAY_DATA
+	PrintByte	BDA_DCC_TABLE_INDEX
+
+	PopSet	%ax, %bx, %cx
+	ret
+
+/*
  * Prints something like "Function: AX: 0xABCD; Not implemented!\r\n" and stops.
  *
  * This will force us to decide if the missing BIOS function needs a real
@@ -6362,6 +6471,7 @@ NotImplemented:
 
 	/* This is often useful as well */
 	call	PrintRegisters
+	call	PrintVideoControlDataArea
 
 	/* The user is more likely to see this */
 	call	ShowBlueScreenOfDeath
