@@ -3393,6 +3393,9 @@ PM_GetDisplayPowerState:
  * BL - Subfunction (not used)
  */
 VBE_OemExtensions:
+	DHeader "VBE_OemExtensions", %bx
+	/* Not supported, return 0 in AL. */
+	xor	%al, %al
 	ret
 
 /*
