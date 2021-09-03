@@ -2580,7 +2580,17 @@ VBE_SetMode:
 	/* Ignore all other flags */
 	and	$0x01ff, %bx
 
-	/* Find the information for this mode */
+	/* Is this a VBE mode? */
+	test	$0x0100, %bx
+	jnz	0f
+
+	/* If not, call SetVideoMode and return*/
+	xor	%ax, %ax
+	mov	%bl, %al
+	call	SetVideoMode
+	jmp	2f
+
+0:	/* Find the information for this mode */
 	mov	%bx, %cx
 	call	GetVbeModeInfo	# -> %bx
 	jnc	1f
