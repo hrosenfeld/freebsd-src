@@ -2657,9 +2657,11 @@ VBE_ReturnCurrentMode:
 	or	$0x4000, %bx	# Linear frame buffer
 	jmp	1f
 
-	/* "Function call invalid in current video mode" */
-0:	mov	$0x034f, %ax
-	jmp	2f
+	/* Return BIOS video mode */
+0:	mov	%al, %bh
+	and	$0x80, %bh
+	and	$0x3f, %al
+	mov	%al, %bl
 
 1:	mov	$0x004f, %ax
 2:	ret
