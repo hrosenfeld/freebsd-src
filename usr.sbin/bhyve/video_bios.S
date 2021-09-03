@@ -114,7 +114,7 @@
  * Required Arguments:
  *   Text - Typically a function name
  */
-.macro DHeader Text
+.macro DHeader Text, Regs:vararg
 #ifdef	DEBUGGING
 
 	/*
@@ -123,15 +123,37 @@
 	 * to INT 10h and allows us to ignore internal function calls.
 	 */
 	testb	$0x10, BDA_VIDEO_FEATURE_BITS
-	jnz	0f
+	jnz	1f
 	orb	$0x10, BDA_VIDEO_FEATURE_BITS
 
 	/* Print the given text to DEBUG_PORT */
 	call	PrintDebugHeader
 	jmp	0f
-	.asciz	"\Text\r\n"
+	.asciz	"\Text"
 0:
+.ifnb	\Regs
+	PrintReg \Regs
+.endif
+
+	push	%ax
+	mov	$STR_EOL, %ax
+	call	PrintString
+	pop	%ax
+1:
 #endif
+.endm
+
+.macro PrintReg Reg, Tail:vararg
+.ifnb	\Reg
+	print	' '
+	push	%ax
+	mov	\Reg, %ax
+	call	PrintAxRegister
+	pop	%ax
+.ifnb	\Tail
+	PrintReg \Tail
+.endif
+.endif
 .endm
 
 .macro	PrintByte Byte
@@ -1066,7 +1088,7 @@ SetVideoMode:
  *      CL - Bottom line for the cursor (0-31)
  */
 SetCursorType:
-	DHeader	"SetCursorType"
+	DHeader	"SetCursorType", %cx
 	PushSet	%ax, %cx, %dx
 
 	/* Save our new type in the BIOS Data Area */
@@ -1095,7 +1117,7 @@ SetCursorType:
  *      DL - Column (zero-based)
  */
 SetCursorPosition:
-	DHeader	"SetCursorPosition"
+	DHeader	"SetCursorPosition", %bx, %dx
 	PushSet	%ax, %bx, %cx, %dx
 
 	/* Silently ignore page numbers too high for the current mode */
@@ -1162,7 +1184,7 @@ SetCursorPosition:
  *      CL - Bottom scanline of cursor
  */
 GetCursorPosition:
-	DHeader	"GetCursorPosition"
+	DHeader	"GetCursorPosition", %bx
 	PushSet	%ax, %bx
 
 	/* Silently ignore page numbers too high for the current mode */
@@ -1251,7 +1273,7 @@ SelectActiveDisplayPage:
  *      DX - Unsigned row/column for lower right corner of the scroll area
  */
 ScrollActivePageUp:
-	DHeader	"ScrollActivePageUp"
+	DHeader	"ScrollActivePageUp", %bx, %cx, %dx
 	PushSet	%ax
 
 	test	%al, %al
@@ -1274,7 +1296,7 @@ ScrollActivePageUp:
  *      DX - Unsigned row/column for lower right corner of the scroll area
  */
 ScrollActivePageDown:
-	DHeader	"ScrollActivePageDown"
+	DHeader	"ScrollActivePageDown", %bx, %cx, %dx
 
 	test	%al, %al
 	jl	0f
@@ -1295,7 +1317,7 @@ ScrollActivePageDown:
  *      AH - The attribute
  */
 ReadCharacterAndAttribute:
-	DHeader	"ReadCharacterAndAttribute"
+	DHeader	"ReadCharacterAndAttribute", %bx
 	PushSet	%es, %si
 
 	/* Abort for page numbers too high for the current mode */
@@ -1325,7 +1347,7 @@ ReadCharacterAndAttribute:
  *      CX - Count of characters to write
  */
 WriteCharacterAndAttribute:
-	DHeader	"WriteCharacterAndAttribute"
+	DHeader	"WriteCharacterAndAttribute", %bx, %cx
 	PushSet	%ax, %cx, %dx, %es, %di
 
 	/* Check if a text mode is active */
@@ -1365,7 +1387,7 @@ WriteCharacterAndAttribute:
  *      CX - Count of characters to write
  */
 WriteCharacter:
-	DHeader	"WriteCharacter"
+	DHeader	"WriteCharacter", %bx, %cx
 	PushSet	%ax, %bx, %cx, %di, %es
 
 	/*
@@ -1400,6 +1422,7 @@ WriteCharacter:
  * This will only be relevant if we ever implement those.
  */
 SetColorPalette:
+	DHeader "SetColorPalette"
 	JmpNotImplemented	"SetColorPalette"
 
 /*
@@ -1416,7 +1439,7 @@ SetColorPalette:
  *      DX - Row number
  */
 WriteDot:
-	DHeader	"WriteDot"
+	DHeader	"WriteDot", %bx, %cx, %dx
 	cmpb	$0x12, BDA_DISPLAY_MODE
 	je	WriteDot_0x12
 	JmpNotImplemented "WriteDot"
@@ -1437,7 +1460,7 @@ WriteDot:
  *      AL - Color value
  */
 ReadDot:
-	DHeader	"ReadDot"
+	DHeader	"ReadDot", %bx, %cx, %dx
 	cmpb	$0x12, BDA_DISPLAY_MODE
 	je	ReadDot_0x12
 	JmpNotImplemented	"ReadDot"
@@ -1457,7 +1480,7 @@ ReadDot:
  *      BL - Foreground color in graphics mode
  */
 WriteTeletypeToActivePage:
-	DHeader	"WriteTeletypeToActivePage"
+	DHeader	"WriteTeletypeToActivePage", %bx
 	PushSet	%ax, %bx, %cx, %dx
 
 	/* Get the current cursor position */
@@ -1558,7 +1581,7 @@ HandlePalette:
  *      BH - Value to set
  */
 HandlePalette_SetIndividualPaletteRegister:
-	DHeader	"HandlePalette_SetIndividualPaletteRegister"
+	DHeader	"HandlePalette_SetIndividualPaletteRegister", %bx
 	PushSet	%ax, %dx
 
 	/* Reset the flip-flop before writing anything */
@@ -1585,7 +1608,7 @@ HandlePalette_SetIndividualPaletteRegister:
  *   ES:DX - Pointer to 17-byte table (16 palette bytes + 1 overscan byte)
  */
 HandlePalette_SetAllPaletteRegistersAndOverscan:
-	DHeader	"HandlePalette_SetAllPaletteRegistersAndOverscan"
+	DHeader	"HandlePalette_SetAllPaletteRegistersAndOverscan", %es, %dx
 	PushSet	%ax, %bx, %cx, %dx, %si
 
 	/* Reset the flip-flop before writing anything */
@@ -1634,7 +1657,7 @@ HandlePalette_SetAllPaletteRegistersAndOverscan:
  *      DH - Red value to set
  */
 HandlePalette_SetIndividualColorRegister:
-	DHeader	"HandlePalette_SetIndividualColorRegister"
+	DHeader	"HandlePalette_SetIndividualColorRegister", %bx, %cx, %dx
 	PushSet	%ax, %dx
 
 	/* Select the color register */
@@ -1669,7 +1692,7 @@ HandlePalette_SetIndividualColorRegister:
  *   ES:DX - Pointer to table of color values (Order: RGB)
  */
 HandlePalette_SetBlockOfColorRegisters:
-	DHeader	"HandlePalette_SetBlockOfColorRegisters"
+	DHeader	"HandlePalette_SetBlockOfColorRegisters", %bx, %cx, %es, %dx
 	PushSet	%ax, %bx, %cx, %dx, %si
 
 	/* Move the pointer to a more useful register */
@@ -1740,6 +1763,7 @@ HandleFont:
  *      DX - Character offset into block
  */
 HandleFont_UserAlphaLoad:
+	DHeader	"HandleFont_UserAlphaLoad", %es, %bp, %bx, %cx, %dx
 	PushSet	%ax, %bx, %dx, %bp, %di, %ds
 
 	/* Restore the original %bp value */
@@ -1785,7 +1809,7 @@ HandleFont_UserAlphaLoad:
  *      DL - Rows (number of character rows on screen - 1)
  */
 HandleFont_Information:
-	DHeader	"HandleFont_Information"
+	DHeader	"HandleFont_Information", %bx
 
 	/* Handle the fonts we have */
 
@@ -2004,7 +2028,7 @@ AlternateSelect_CursorEmulation:
  *      DL - Start column
  */
 WriteString:
-	DHeader	"WriteString"
+	DHeader	"WriteString", %es, %bp, %bx, %cx, %dx
 	PushSet	%ax, %bx, %cx, %dx, %bp
 
 	/* Restore the original %bp value */
@@ -2093,6 +2117,7 @@ ReadDisplayCombinationCode:
  *      AL - 0x1A (Function supported)
  */
 WriteDisplayCombinationCode:
+	DHeader "WriteDisplayCombinationCode", %bx
 	JmpNotImplemented	"WriteDisplayCombinationCode"
 
 /*
@@ -2108,7 +2133,7 @@ WriteDisplayCombinationCode:
  *      AL - 0x1B (Function supported)
  */
 ReturnFunctionalityAndStateInfo:
-	DHeader	"ReturnFunctionalityAndStateInfo"
+	DHeader	"ReturnFunctionalityAndStateInfo", %es, %di, %bx
 	PushSet	%bx, %cx, %si, %di
 
 	cmp	$0x0000, %bx
@@ -2220,7 +2245,7 @@ HandleVideoState:
  *      BX - Number of 64-byte blocks for buffer
  */
 ReturnStateBufferSize:
-	DHeader	"ReturnStateBufferSize"
+	DHeader	"ReturnStateBufferSize", %cx
 	PushSet	%cx
 
 	xor	%bx, %bx
@@ -2272,7 +2297,7 @@ ReturnStateBufferSize:
  *      AL - 0x1c (Function supported)
  */
 SaveVideoState:
-	DHeader	"SaveVideoState"
+	DHeader	"SaveVideoState", %es, %bx, %cx
 	PushSet	%di
 
 	/* This index is passed between the subfunctions */
@@ -2310,7 +2335,7 @@ SaveVideoState:
  *      AL - 0x1c (Function supported)
  */
 RestoreVideoState:
-	DHeader	"RestoreVideoState"
+	DHeader	"RestoreVideoState", %es, %bx, %cx
 	PushSet	%si
 
 	/* This index is passed between the subfunctions */
@@ -2389,7 +2414,11 @@ HandleVesaBiosExtension:
 	je	VBE_OemExtensions
 	cmp	$0x15, %al
 	je	VBE_DisplayDataChannel
-	/* Not supported, return 0 in AL. */
+	jmp	VBE_Unsupported
+
+/* Not supported, return 0 in AL. */
+VBE_Unsupported:
+	DHeader "VBE_Unsupported"
 	xor	%al, %al
 	ret
 
@@ -2405,7 +2434,7 @@ HandleVesaBiosExtension:
  *      AX - VBE Return Status
  */
 VBE_ReturnControllerInfo:
-	DHeader	"VBE_ReturnControllerInfo"
+	DHeader	"VBE_ReturnControllerInfo", %es, %di
 	PushSet	%cx, %si, %di, %ds
 	cld
 
@@ -2450,7 +2479,7 @@ VBE_ReturnControllerInfo:
  *      AX - VBE Return Status
  */
 VBE_ReturnModeInfo:
-	DHeader	"VBE_ReturnModeInfo"
+	DHeader	"VBE_ReturnModeInfo", %es, %di, %cx
 	PushSet	%bx, %cx, %dx, %si, %di, %ds
 	cld
 
@@ -2541,7 +2570,7 @@ VBE_ReturnModeInfo:
  *      AX - VBE Return Status
  */
 VBE_SetMode:
-	DHeader	"VBE_SetMode"
+	DHeader	"VBE_SetMode", %es, %di, %bx
 	PushSet	%bx, %cx, %dx
 
 	/* Keep bit D15 */
@@ -2659,7 +2688,7 @@ VBE_HandleState:
  *      BX - Number of 64-byte blocks for the state buffer
  */
 VBE_ReturnStateBufferSize:
-	DHeader	"VBE_ReturnStateBufferSize"
+	DHeader	"VBE_ReturnStateBufferSize", %cx
 
 	/* We only need six bytes at the end of this... */
 	call	ReturnStateBufferSize
@@ -2684,7 +2713,7 @@ VBE_ReturnStateBufferSize:
  *      AX - VBE Return Status
  */
 VBE_SaveState:
-	DHeader	"VBE_SaveState"
+	DHeader	"VBE_SaveState", %es, %bx, %cx
 	PushSet	%bx, %cx, %dx, %di
 
 	/* Save the basic video state */
@@ -2749,7 +2778,7 @@ VBE_SaveState:
  *      AX - VBE Return Status
  */
 VBE_RestoreState:
-	DHeader	"VBE_RestoreState"
+	DHeader	"VBE_RestoreState", %es, %bx, %cx
 	PushSet	%bx, %cx, %dx, %si
 
 	/* Restore the basic video state */
@@ -2847,7 +2876,7 @@ VBE_HandleLogicalScanLineLength:
  *      DX - Maximum Number of Scan Lines
  */
 VBE_SetScanLineLengthInPixels:
-	DHeader	"VBE_SetScanLineLengthInPixels"
+	DHeader	"VBE_SetScanLineLengthInPixels", %cx
 
 	/* Get the current mode info */
 	call	GetCurrentModeInfo
@@ -2956,7 +2985,7 @@ VBE_GetScanLineLength:
  *      DX - Maximum Number of Scan Lines
  */
 VBE_SetScanLineLengthInBytes:
-	DHeader	"VBE_SetScanLineLengthInBytes"
+	DHeader	"VBE_SetScanLineLengthInBytes", %cx
 	PushSet	%bx, %cx, %dx
 
 	/* Get the current mode info */
@@ -3062,7 +3091,7 @@ VBE_HandleDisplayStart:
  *      AX - VBE Return Status
  */
 VBE_SetDisplayStart:
-	DHeader	"SetDisplayStart"
+	DHeader	"SetDisplayStart", %cx, %dx
 
 	/* Check if this is just a reset */
 	test	%cx, %cx
@@ -3091,7 +3120,7 @@ VBE_SetDisplayStart:
  *      AX - VBE Return Status
  */
 VBE_SetDisplayStartDuringVerticalRetrace:
-	DHeader	"SetDisplayStartDuringVerticalRetrace"
+	DHeader	"SetDisplayStartDuringVerticalRetrace", %cx, %dx
 
 	/* Hah! Like we care about the difference... */
 	call	VBE_SetDisplayStart
@@ -3151,7 +3180,7 @@ VBE_HandlePaletteData:
  *      AX - VBE Return Status
  */
 VBE_SetPaletteData:
-	DHeader	"VBE_SetPaletteData"
+	DHeader	"VBE_SetPaletteData", %es, %di, %cx, %dx
 	PushSet	%cx, %dx, %di
 
 	/* Validate index values */
@@ -3231,7 +3260,7 @@ VBE_GetSecondaryPaletteData:
  *      AX - VBE Return Status
  */
 VBE_SetPaletteDataDuringVerticalRetrace:
-	DHeader	"VBE_SetPaletteDataDuringVerticalRetrace"
+	DHeader	"VBE_SetPaletteDataDuringVerticalRetrace", %es, %di, %cx, %dx
 
 	/* Hah! Like we care about the difference... */
 	call	VBE_SetPaletteData
@@ -3262,7 +3291,7 @@ VBE_HandlePixelClock:
  *     ECX - Closest pixel clock
  */
 VBE_GetClosestPixelClock:
-	DHeader	"VBE_GetClosestPixelClock"
+	DHeader	"VBE_GetClosestPixelClock", %cx, %dx
 	mov	$0x004f, %ax
 	ret
 
@@ -3301,7 +3330,7 @@ VBE_PowerManagement:
  *          0x08 - Reduced On (for flat screens)
  */
 PM_GetCapabilities:
-	DHeader	"PM_GetCapabilities"
+	DHeader	"PM_GetCapabilities", %es, %di
 	mov	$0x004f, %ax
 	mov	$0x0010, %bx
 	ret
@@ -3323,7 +3352,7 @@ PM_GetCapabilities:
  *      AX - VBE Return Status
  */
 PM_SetDisplayPowerState:
-	DHeader	"PM_SetDisplayPowerState"
+	DHeader	"PM_SetDisplayPowerState", %bx
 	test	%bh, %bh
 	jz	0f
 	mov	$0x024f, %ax
@@ -3414,7 +3443,7 @@ DDC_ReportCapabilities:
  *      AX - VBE Return Status
  */
 DDC_ReadEDID:
-	DHeader	"DDC_ReadEDID"
+	DHeader	"DDC_ReadEDID", %es, %di
 	PushSet	%cx, %si, %di, %ds
 	cld
 
