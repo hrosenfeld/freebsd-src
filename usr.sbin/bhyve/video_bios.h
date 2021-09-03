@@ -34,6 +34,7 @@
 
 /* Default debug output: COM2 */
 #define	DEBUG_PORT	0x2f8
+#define	DEBUGGING	1
 
 /*** Splash Screen ************************************************************/
 

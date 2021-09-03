@@ -134,6 +134,14 @@
 #endif
 .endm
 
+.macro JmpNotImplemented Text
+	push	%ax
+	mov	$\@f, %ax
+	call	PrintString
+	pop	%ax
+	jmp	NotImplemented
+\@:	.asciz	"\Text: "
+.endm
 /*
  * Pushes the given arguments from left to right.
  * This is nice when you have many things to push.
@@ -904,7 +912,7 @@ INT_10h:
 	je	HandleVesaBiosExtension
 
 	/* Block if the function was not implemented */
-	jmp	NotImplemented
+	JmpNotImplemented	"INT_10h"
 
 /*
  * Restores the original state before returning.
@@ -951,7 +959,8 @@ SetVideoMode:
 	mov	%ah, %al # Restore the original AX state
 	or	%cl, %al
 	xor	%ah, %ah
-	jz	NotImplemented
+	jnz	0f
+	JmpNotImplemented	"SetVideoMode"
 
 	/* The new mode looks OK; update the BDA and registers */
 0:	call	UpdateBiosDataArea
@@ -1332,7 +1341,7 @@ WriteCharacter:
  * This will only be relevant if we ever implement those.
  */
 SetColorPalette:
-	jmp	NotImplemented
+	JmpNotImplemented	"SetColorPalette"
 
 /*
  * INT 0x10, AH = 0x0C
@@ -1351,7 +1360,7 @@ WriteDot:
 	DHeader	"WriteDot"
 	cmpb	$0x12, BDA_DISPLAY_MODE
 	je	WriteDot_0x12
-	jmp	NotImplemented
+	JmpNotImplemented "WriteDot"
 
 /*
  * INT 0x10, AH = 0x0D
@@ -1372,7 +1381,7 @@ ReadDot:
 	DHeader	"ReadDot"
 	cmpb	$0x12, BDA_DISPLAY_MODE
 	je	ReadDot_0x12
-	jmp	NotImplemented
+	JmpNotImplemented	"ReadDot"
 
 /*
  * INT 0x10, AH = 0x0E
@@ -1474,7 +1483,7 @@ HandlePalette:
 	je	HandlePalette_SetIndividualColorRegister
 	cmp	$0x12, %al
 	je	HandlePalette_SetBlockOfColorRegisters
-	jmp	NotImplemented
+	JmpNotImplemented	"HandlePalette"
 
 /*
  * INT 0x10, AH = 0x10, AL = 0x00
@@ -1654,7 +1663,7 @@ HandleFont:
 	je	HandleFont_UserAlphaLoad
 	cmp	$0x30, %al
 	je	HandleFont_Information
-	jmp	NotImplemented
+	JmpNotImplemented	"HandleFont"
 
 /*
  * INT 0x10, AH = 0x11, AL = 0x00
@@ -1754,7 +1763,7 @@ HandleFont_Information:
 	jmp	8f
 
 	/* Would it be better to return a NULL pointer? */
-7:	jmp	NotImplemented
+7:	JmpNotImplemented	"HandleFont_Information"
 
 	/* Set the remaining return values */
 8:	mov	%cs, %cx
@@ -1788,7 +1797,7 @@ AlternateSelect:
 	je	AlternateSelect_DefaultPaletteLoading
 	cmp	$0x34, %bl	# Cursor emulation
 	je	AlternateSelect_CursorEmulation
-	jmp	NotImplemented
+	JmpNotImplemented	"AlternateSelect"
 
 /*
  * INT 0x10, AH = 0x12, BL = 0x10
@@ -1984,7 +1993,7 @@ HandleDisplayCombinationCode:
 	je	ReadDisplayCombinationCode
 	cmp	$0x01, %al
 	je	WriteDisplayCombinationCode
-	jmp	NotImplemented
+	JmpNotImplemented	"HandleDisplayCombinationCode"
 
 /*
  * INT 0x10, AH = 0x1A, AL = 0x00
@@ -2025,7 +2034,7 @@ ReadDisplayCombinationCode:
  *      AL - 0x1A (Function supported)
  */
 WriteDisplayCombinationCode:
-	jmp	NotImplemented
+	JmpNotImplemented	"WriteDisplayCombinationCode"
 
 /*
  * INT 0x10, AH = 0x1B
@@ -2134,7 +2143,7 @@ HandleVideoState:
 	je	SaveVideoState
 	cmp	$0x02, %al
 	je	RestoreVideoState
-	jmp	NotImplemented
+	JmpNotImplemented	"HandleVideoState"
 
 /*
  * INT 0x10, AH = 0x1C, AL = 0x00
@@ -2572,7 +2581,7 @@ VBE_HandleState:
 	je	VBE_SaveState
 	cmp	$0x02, %dl
 	je	VBE_RestoreState
-	jmp	NotImplemented
+	JmpNotImplemented	"VBE_HandleState"
 
 /*
  * INT 0x10, AH = 0x4f, AL = 0x04, DL = 0x00
@@ -2760,7 +2769,7 @@ VBE_HandleLogicalScanLineLength:
 	je	VBE_SetScanLineLengthInBytes
 	cmp	$0x03, %bl
 	je	VBE_GetMaximumScanLineLength
-	jmp	NotImplemented
+	JmpNotImplemented	"VBE_HandleLogicalScanLineLength"
 
 /*
  * INT 0x10, AH = 0x4f, AL = 0x06, BL = 0x00
@@ -2979,7 +2988,7 @@ VBE_HandleDisplayStart:
 	je	VBE_SetDisplayStart
 	cmp	$0x80, %bl
 	je	VBE_SetDisplayStartDuringVerticalRetrace
-	jmp	NotImplemented
+	JmpNotImplemented	"VBE_HandleDisplayStart"
 
 /*
  * INT 0x10, AH = 0x4f, AL = 0x07, BL = 0x00
@@ -3063,7 +3072,7 @@ VBE_HandlePaletteData:
 	je	VBE_GetSecondaryPaletteData
 	cmp	$0x80, %bl
 	je	VBE_SetPaletteDataDuringVerticalRetrace
-	jmp	NotImplemented
+	JmpNotImplemented	"VBE_HandlePaletteData"
 
 /*
  * INT 0x10, AH = 0x4f, AL = 0x09, BL = 0x00
@@ -3178,7 +3187,7 @@ VBE_SetPaletteDataDuringVerticalRetrace:
 VBE_HandlePixelClock:
 	cmp	$0x00, %bl
 	je	VBE_GetClosestPixelClock
-	jmp	NotImplemented
+	JmpNotImplemented	"VBE_HandlePixelClock"
 
 /*
  * INT 0x10, AH = 0x4f, AL = 0x0b, BL = 0x00
@@ -3213,7 +3222,7 @@ VBE_PowerManagement:
 	je	PM_SetDisplayPowerState
 	cmp	$0x02, %bl
 	je	PM_GetDisplayPowerState
-	jmp	NotImplemented
+	JmpNotImplemented	"VBE_PowerManagement"
 
 /*
  * INT 0x10, AH = 0x4f, AL = 0x10, BL = 0x00
@@ -3312,7 +3321,7 @@ VBE_DisplayDataChannel:
 	je	DDC_ReportCapabilities
 	cmp	$0x01, %bl
 	je	DDC_ReadEDID
-	jmp	NotImplemented
+	JmpNotImplemented	"VBE_DisplayDataChannel"
 
 /*
  * INT 0x10, AH = 0x4f, AL = 0x15, BL = 0x00
@@ -3485,7 +3494,9 @@ GetModeIndex:
 	add	$0x13, %al
 	jmp	5f
 0:	cmp	$0x10, %bh	# 400 scan lines
-	jne	NotImplemented
+	je	0f
+	JmpNotImplemented	"GetModeIndex"
+0:
 	shr	$1, %al
 	add	$0x17, %al
 	jmp	5f
@@ -3862,7 +3873,7 @@ CopyRow:
 	je	CopyRow_Text
 	cmpb	$0x12, BDA_DISPLAY_MODE
 	je	CopyRow_0x12
-	jmp	NotImplemented
+	JmpNotImplemented	"CopyRow"
 
 /*
  * Clears a row of characters in the display buffer.
@@ -3880,7 +3891,7 @@ ClearRow:
 	je	ClearRow_Text
 	cmpb	$0x12, BDA_DISPLAY_MODE
 	je	ClearRow_0x12
-	jmp	NotImplemented
+	JmpNotImplemented	"ClearRow"
 
 /*
  * CopyRow implementation for text modes.
@@ -4086,7 +4097,7 @@ GetCharacterOffset:
 	je	GetCharacterOffset_Text
 	cmpb	$0x12, BDA_DISPLAY_MODE
 	je	GetCharacterOffset_0x12
-	jmp	NotImplemented
+	JmpNotImplemented	"GetCharacterOffset"
 
 /*
  * GetCharacterOffset implementation for text modes.
@@ -4173,7 +4184,7 @@ DrawRepeatedCharacter:
 DrawCharacter:
 	cmpb	$0x12, BDA_DISPLAY_MODE
 	je	DrawCharacter_0x12
-	jmp	NotImplemented
+	JmpNotImplemented	"DrawCharacter"
 
 /*
  * Moves from one character address to the next on the same row.
@@ -4189,7 +4200,7 @@ DrawCharacter:
 StepCharacter:
 	cmpb	$0x12, BDA_DISPLAY_MODE
 	je	StepCharacter_0x12
-	jmp	NotImplemented
+	JmpNotImplemented	"StepCharacter"
 
 /*
  * StepCharacter implementation for VGA mode 0x12.
@@ -4503,7 +4514,7 @@ LoadDefaultPalette:
 LoadDefaultFont:
 	cmpb	$0x03, BDA_DISPLAY_MODE
 	je	LoadDefaultFont_0x03
-	jmp	NotImplemented
+	JmpNotImplemented	"LoadDefaultFont"
 
 /*
  * LoadDefaultFont implementation for VGA mode 0x03.
@@ -6326,13 +6337,12 @@ PrintDebugHeader:
 	ret
 
 /*
- * Prints something like "AX: 0xABCD; Not implemented!\r\n" and stops.
+ * Prints something like "Function: AX: 0xABCD; Not implemented!\r\n" and stops.
  *
- * This will force us to decide if the missing BIOS function needs a
- * real implementation or if an empty dummy function is good enough.
+ * This will force us to decide if the missing BIOS function needs a real
+ * implementation or if an empty dummy function is good enough.
  */
 NotImplemented:
-
 	/* Print the prefix */
 	push	%ax
 	mov	$STR_AX, %ax
