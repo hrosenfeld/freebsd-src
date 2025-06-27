@@ -86,6 +86,7 @@
 #include "vrtc.h"
 #include "vmm_stat.h"
 #include "vmm_lapic.h"
+#include "x86.h"
 
 #include "io/ppt.h"
 #include "io/iommu.h"
@@ -212,6 +213,9 @@ vcpu_cleanup(struct vcpu *vcpu, bool destroy)
 	vcpu->cookie = NULL;
 	if (destroy) {
 		vmm_stat_free(vcpu->stats);
+
+		vcpu_cpuid_cleanup(&vcpu->cpuid_cfg);
+
 		fpu_save_area_free(vcpu->guestfpu);
 		vcpu_lock_destroy(vcpu);
 		free(vcpu, M_VM);
@@ -241,6 +245,8 @@ vcpu_alloc(struct vm *vm, int vcpu_id)
 static void
 vcpu_init(struct vcpu *vcpu)
 {
+	vcpu_cpuid_init(&vcpu->cpuid_cfg);
+
 	vcpu->cookie = vmmops_vcpu_init(vcpu->vm->cookie, vcpu, vcpu->vcpuid);
 	vcpu->vlapic = vmmops_vlapic_init(vcpu->cookie);
 	vm_set_x2apic_state(vcpu, X2APIC_DISABLED);
@@ -1593,6 +1599,12 @@ vm_set_capability(struct vcpu *vcpu, int type, int val)
 		return (EINVAL);
 
 	return (vmmops_setcap(vcpu->cookie, type, val));
+}
+
+vcpu_cpuid_config_t *
+vm_cpuid_config(struct vcpu *vcpu)
+{
+	return (&vcpu->cpuid_cfg);
 }
 
 struct vlapic *
