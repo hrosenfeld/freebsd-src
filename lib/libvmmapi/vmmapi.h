@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2011 NetApp, Inc.
+ * Copyright (c) 2026 Hans Rosenfeld
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -227,7 +228,9 @@ const char *vm_get_stat_desc(struct vmctx *ctx, int index);
 #ifdef __amd64__
 int	vm_get_x2apic_state(struct vcpu *vcpu, enum x2apic_state *s);
 int	vm_set_x2apic_state(struct vcpu *vcpu, enum x2apic_state s);
-
+int	vm_get_cpuid(struct vcpu *vcpu, struct vm_vcpu_cpuid_config *cfg);
+int	vm_set_cpuid(struct vcpu *vcpu, struct vm_vcpu_cpuid_config *cfg);
+int	vm_legacy_cpuid(struct vcpu *vcpu, struct vm_legacy_cpuid *vlc);
 int	vm_get_hpet_capabilities(struct vmctx *ctx, uint32_t *capabilities);
 
 /*
