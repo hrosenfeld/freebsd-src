@@ -43,6 +43,7 @@
 .Op Cm cpus Ns \&=
 .Ar numcpus
 .Oc
+.Op Cm ,model= Ar model
 .Op Cm ,sockets= Ar n
 .Op Cm ,cores= Ar n
 .Op Cm ,threads= Ar n
@@ -146,29 +147,14 @@ xAPIC mode is the default setting so this option is redundant.
 It will be deprecated in a future version.
 .It Fl C
 Include guest memory in core files.
-.It Fl c Oo Oo Cm cpus= Oc Ns Ar numcpus Oc Ns Oo Cm ,sockets= Ns Ar n Oc Ns Oo Cm ,cores= Ns Ar n Oc Ns Oo Cm ,threads= Ns Ar n Oc
-Number of guest virtual CPUs
-and/or the CPU topology.
-The default value for each of
-.Ar numcpus ,
-.Ar sockets ,
-.Ar cores ,
-and
-.Ar threads
+.It Fl c Oo Oo Cm cpus= Oc Ns Ar numcpus Oc Ns Oo Cm ,model= Ns Ar model Oc Ns Oo Cm ,sockets= Ns Ar n Oc Ns Oo Cm ,cores= Ns Ar n Oc Ns Oo Cm ,threads= Ns Ar n Oc
+Virtual CPU configuration.
+.Bl -tag -width 10n
+.It Cm cpus Ns = Ns Ar numcpus
+The number of guest virtual CPUs.
+The default value for
+.Ar numcpus
 is 1.
-If
-.Ar numcpus
-is not specified then it will be calculated from the other arguments.
-The topology must be consistent in that the
-.Ar numcpus
-must equal the product of
-.Ar sockets ,
-.Ar cores ,
-and
-.Ar threads .
-If a
-.Ar setting
-is specified more than once the last one has precedence.
 .Pp
 The maximum number of virtual CPUs defaults to the number of active
 physical CPUs in the system available via the
@@ -178,6 +164,39 @@ variable.
 The limit can be adjusted via the
 .Va hw.vmm.maxcpu
 loader tunable.
+.It Cm model Ns = Ns Ar model
+The CPU model to emulate.
+If specified, a
+.Ar model Ns - Ns
+specific configuration file will be loaded from the directory
+.Pa /usr/share/bhyve/cpu .
+If no CPU
+.Ar model
+is specified, the host CPU model will be used.
+.It Cm sockets Ns = Ns Ar n , Cm cores Ns = Ns Ar n , Cm threads Ns = Ns Ar n
+Explicitly specify the CPU topology.
+If
+.Ar numcpus
+is not specified, it will be calculated from these arguments.
+If
+.Ar numcpus
+was specified, the topology must be consistent in that the
+.Ar numcpus
+must equal the product of
+.Ar sockets ,
+.Ar cores ,
+and
+.Ar threads .
+The default value for each of
+.Ar sockets ,
+.Ar cores ,
+and
+.Ar threads
+is 1.
+.El
+.Pp
+If one of the above arguments is specified more than once, the last occurence
+takes precedence.
 .It Fl D
 Destroy the VM on guest initiated power-off.
 .It Fl e

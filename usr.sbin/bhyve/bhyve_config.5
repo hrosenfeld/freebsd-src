@@ -311,6 +311,17 @@ is pinned.
 .Ss x86-Specific Settings
 .Bl -column "domains.N.domain_policy" "integer" "Default"
 .It Sy Name Ta Sy Format Ta Sy Default Ta Sy Description
+.It Va cpuid . Ns Ar * Ta string Ta none Ta
+CPUID configuration for all virtual CPUs.
+See
+.Sx "CPUID CONFIGURATION"
+for details.
+.It Va vcpu . Ns Ar N . Ns Va cpuid . Ns * Ta string Ta none Ta
+CPUID configuration for the virtual CPU
+.Ar N .
+See
+.Sx "CPUID CONFIGURATION"
+for details.
 .It Va x86.mptable Ta bool Ta true Ta
 Generate an MPTable.
 .It Va x86.x2apic Ta bool Ta false Ta
@@ -373,6 +384,617 @@ process.
 The
 .Ql tcp=ip:port
 backend listens for TCP connections.
+.El
+.Sh CPUID CONFIGURATION
+The bhyve hypervisor allows for fine-grained manipulation of the complete set
+of information returned by the x86
+.Sy CPUID
+instruction to a guest VM.
+By default, the values returned are based on those of the host CPU.
+.Pp
+.Sy CPUID
+information is structured by numbered
+.Sy functions
+.Po sometimes also referred to as
+.Sq Sy leaves
+.Pc .
+Some
+.Sy functions
+support multiple
+.Sy indices .
+The corresponding values are returned in the 4 CPU registers
+.Sy EAX ,
+.Sy EBX ,
+.Sy ECX ,
+and
+.Sy EDX .
+.Pp
+The bhyve hypervisor imposes a number of constraints on explicit modifications
+of the information returned by the
+.Sy CPUID
+instruction:
+.Bl -tag -width indent
+.It immutable
+Bits in a register that may not be changed from the value set by the hypervisor
+or the host CPU, e.g. feature bits corresponding to features that must remain
+enabled or disabled for correct guest operation.
+.It clear-only
+Bits which may only be cleared if set by the hypervisor or the host CPU, e.g.
+feature bits corresponding to instruction set extensions which may not be
+enabled if unsupported by the host CPU.
+.It lower-only
+Bitmasks whose numerical value may only be lowered respective to the value set
+by the hypervisor or the host CPU, e.g. values related to cache and TLB sizes.
+.El
+.Pp
+The bhyve hypervisor also applies a number of automatic fixups to the provided
+CPUID configuration:
+.Bl -bullet
+.It
+ensure consistency across all vCPUs with the configured CPU topology
+.It
+remove unreachable CPUID functions based on the CPUID-region specific maximum
+levels
+.It
+clear and/or propagate CPUID information according to CPU vendor rules
+.El
+.Pp
+The following variables can be used to modify the behaviour of the
+.Sy CPUID
+emulation:
+.Bl -tag -width indent
+.It Va cpuid . Ns Va check
+Set the default constraints check behaviour for the CPUID configuration:
+.Bl -tag -width indent
+.It none
+Disable all constraints checks.
+.It warn
+Warn about constraints violations.
+.It fail
+Warn about constraints violations and abort the guest startup.
+.It fix
+Warn about constraints violations and automatically fix them.
+.El
+.It Va cpuid . Ns Va fallback-style
+Set the fallback style to use when an unsupported
+.Sy CPUID
+function or index is requested.
+.Pp
+The following fallback styles are supported:
+.Bl -column "intel" "Intel-style fallback"
+.It Sy Name Ta Sy Fallback-Style Ta Description
+.It Sy amd Ta AMD-style fallback Ta
+Return all zeros for unsupported
+.Sy CPUID
+functions.
+.It Sy intel Ta Intel-style fallback Ta
+Return information for the highest numbered supported
+.Sy CPUID
+function.
+.El
+By default, the appropriate fallback style for the CPU vendor is used.
+.El
+.Pp
+The following variables can be used to modify the information returned by the
+.Sy CPUID
+instruction:
+.Bl -tag -width indent
+.It Va cpuid . Ns Va hypervisor
+The hypervisor identification, a 12-character string returned by CPUID function
+.Sy 0x40000000
+in registers
+.Sy EBX ,
+.Sy ECX ,
+and
+.Sy EDX .
+Whitespaces at the end of the string are significant.
+If the assigned string is less than 12 characters in length, it will be padded
+with
+.Sy nul
+characters.
+.Pp
+The following short-hand aliases for well-known hypervisor identifications are
+supported:
+.Bl -column "virtualbox" "Identification"
+.It Sy Alias Ta Sy Identification Ta Sy Hypervisor
+.It hyperv Ta Dq Microsoft\~Hv Ta
+Microsoft Hyper-V
+.It kvm Ta Dq KVMKVMKVM Ta
+Linux KVM
+.It virtualbox Ta Dq VBoxVBoxVBox Ta
+Oracle VirtualBox
+.It vmware Ta Dq VMwareVMware Ta
+VMware ESXi
+.It xen Ta Dq XenVMMXenVMM Ta
+Xen
+.El
+.Pp
+The default value is
+.Dq bhyve\~bhyve\~ .
+.It Va cpuid . Ns Va vendor
+The CPU vendor identification, a 12-character string returned by CPUID function
+.Sy 0x00000000
+in registers
+.Sy EBX ,
+.Sy EDX ,
+and
+.Sy ECX .
+Whitespaces at the end of the string are significant.
+If the assigned string is less than 12 characters in length, it will be padded
+with
+.Sy nul
+characters.
+.Pp
+The following short-hand aliases for well-known CPU vendor identifications are
+supported:
+.Bl -column "virtualbox" "Identification"
+.It Sy Alias Ta Sy Identification Ta Sy CPU Vendor
+.It amd Ta Dq AuthenticAMD Ta
+AMD
+.It intel Ta Dq GenuineIntel Ta
+Intel
+.El
+.It Va cpuid . Ns Va family
+The CPU family number.
+If not set, this defaults to 6 for Intel CPUs and 15
+.Pq 0xf
+for AMD CPUs.
+.It Va cpuid . Ns Va model
+The CPU model number
+If not set, this defaults to 15
+.Pq 0xf
+for Intel CPUs and 6 for AMD CPUs.
+.It Va cpuid . Ns Va stepping
+The CPU stepping.
+If not set, this defaults to 1.
+.It Va cpuid . Ns Va brand
+The CPU Brand String, a 48-character string returned by CPUID functions
+.Sy 0x80000002 ,
+.Sy 0x80000003 ,
+and
+.Sy 0x80000004 .
+Whitespaces at the end of the string are significant.
+If the assigned string is less than 48 characters in length, it will be padded
+with
+.Sy nul
+characters.
+.It Va cpuid . Ns Va features
+A comma separated list of CPU features to enable or disable.
+To disable a feature, prefix the feature name with a
+.Sq -
+sign.
+Features are enabled and disabled in the order specified.
+If a features is specified multiple times for enabling and disabling,
+the final specification is used.
+.Pp
+The following features are supported:
+.Bl -tag -width indent
+.It Sy 3dnow
+AMD 3DNow! instructions
+.It Sy 3dnowx
+AMD 3DNow! extended instructions
+.It Sy abm
+AMD Advanced Bit Manipulation instructions
+.It Sy acpi
+Intel ACPI thermal monitor and clock control
+.It Sy adx
+Multi-Precision Add-Carry instructions
+.It Sy aesni
+Advanced Encryption Standard New Instructions
+.It Sy amd_apic
+AMD Extended APIC Register Space
+.It Sy amd_ibpb
+AMD Indirect Branch Prediction Barrier
+.It Sy amd_mmx
+AMD Extended MMX
+.It Sy apic
+APIC on chip
+.It Sy arat
+Always-Running APIC Timer
+.It Sy arch_cap
+IA32 Architectural Capabilities MSR
+.It Sy avx
+Advanced Vector Extensions instructions
+.It Sy avx2
+Advanced Vector Extensions 2 instructions
+.It Sy avx5124fmaps
+AVX-512 4-Register Fused Multiply-Accumulation Packet Single Precision
+instructions
+.It Sy avx5124vnniw
+AVX-512 4-Register Vector Neural Network Instructions Word
+.It Sy avx512bitalg
+AVX-512 Bit Algorithm instructions
+.It Sy avx512bw
+AVX-512 Byte and Word instructions
+.It Sy avx512cd
+AVX-512 Conflict Detection instructions
+.It Sy avx512dq
+AVX-512 Doubleword and Quadword instructions
+.It Sy avx512er
+AVX-512 Exponential and Reciprocal instructions
+.It Sy avx512f
+AVX-512 Foundation
+.It Sy avx512ifma
+AVX-512 Integer Fused Multiply-Add
+.It Sy avx512pf
+AVX-512 Prefetch Instructions
+.It Sy avx512vbmi
+AVX-512 Vector Byte Manipulation Instructions
+.It Sy avx512vbmi2
+AVX-512 Vector Byte Manipulation Instructions 2
+.It Sy avx512vl
+AVX-512 Vector Length instructions
+.It Sy avx512vnni
+AVX-512 Vector Neural Network Instructions
+.It Sy avx512vp2intersect
+AVX-512 Vector Pair Intersection instructions
+.It Sy avx512vpopcntdq
+AVX-512 Vector Population Count Doubleword and Quadword instructions
+.It Sy bmi1
+Bit Manipulation Instructions 1
+.It Sy bmi2
+Bit Manipulation Instructions 2
+.It Sy bndcsr
+Intel MPX Bounds Configuration and Status Register State present
+.It Sy bndregs
+Intel MPX Bounds Register State present
+.It Sy cldemote
+Cache Line Demote instruction
+.It Sy clflushopt
+Cache Line Flush Optimized instruction
+.It Sy clfsh
+Cache Line Fush (CLFLUSH) instruction
+.It Sy clwb
+Cache Line Write Back instruction
+.It Sy cmov
+Conditional Move instruction
+.It Sy cmp
+Chip-Multiprocessing
+.It Sy cnxtid
+L1 Context ID
+.It Sy core_cap
+IA32 Core Capabilities MSR
+.It Sy cr8
+MOV CR8 instruction
+.It Sy cx16
+Compare and Exchange 16 Bytes (CMPXCHG16B) instruction
+.It Sy cx8
+Compare and Exchange 8 Bytes (CMPXCHG8B) instruction
+.It Sy dbe
+Data Breakpoint Extension
+.It Sy dca
+Direct Cache Access
+.It Sy de
+Debugging Extensions
+.It Sy ds
+Debug Store
+.It Sy ds_cpl
+Debug Store Current Privilege Level
+.It Sy dtes64
+Debug Store 64-Bit
+.It Sy enqcmd
+Enqueue Command instruction
+.It Sy erms
+Enhanced REP MOVSB / STOSB instructions
+.It Sy est
+Intel Enhanced SpeedStep
+.It Sy f16c
+16-bit Floating Point Conversion instructions
+.It Sy fdp_exc
+FPU Data Pointer Exception Only
+.It Sy ffxsr
+Fast FXSAVE / FXRSTOR instructions
+.It Sy fma
+Fused Multiply-Add
+.It Sy fma4
+4-Operand Fused Multiply-Add
+.It Sy fpu
+Floating-Point Unit present
+.It Sy fsgsbase
+FS / GS Base Address Register read / write instructions
+.It Sy fsrm
+Fast Short REP MOVSB instruction
+.It Sy fxsr
+FXSAVE / FXRSTOR instructions
+.It Sy gfni
+Galois Field New Instructions
+.It Sy hi16_zmm
+Upper 16 ZMM Vector Registers present
+.It Sy hle
+Hardware Lock Elision
+.It Sy htt
+Hyper-Threading Technology
+.It Sy hv
+Hypervisor Virtualization active
+.It Sy ia64
+Intel Architecture 64 (Itanium)
+.It Sy ibs
+AMD Instruction Based Sampling
+.It Sy intel_ibpb
+Intel Indirect Branch Prediction Barrier
+.It Sy invpcid
+Invalidate Process Context Identifier instruction
+.It Sy l1d_flush
+L1 Data Cache Flush supported (IA32_FLUSH_CMD)
+.It Sy la57
+57-bit Linear Addresses supported (5-Level Page Tables)
+.It Sy lahf
+Load / Store AH from / into Flags (LAHF / SAHF) instructions
+.It Sy lm
+Long Mode supported
+.It Sy lwp
+AMD Lightweight Profiling supported
+.It Sy mas
+Misaligned SSE Mode supported
+.It Sy mca
+Machine Check Architecture
+.It Sy mce
+Machine Check Exception
+.It Sy mcuopt
+Microcode Update Options
+.It Sy md_clear
+Microarchitectural Data Clear
+.It Sy mmx
+Multimedia Extensions
+.It Sy mon
+MONITOR / MWAIT instructions
+.It Sy movbe
+MOVBE instruction
+.It Sy movdir64b
+MOVDIR64B instruction (Move 64 Bytes as Direct Store)
+.It Sy movdiri
+MOVDIRI instruction (Move Doubleword / Quadword as Direct Store)
+.It Sy mp
+Multi Processor supported
+.It Sy mpx
+Intel Memory Protection Extensions
+.It Sy msr
+Model-Specific Registers supported
+.It Sy mtrr
+Memory Type Range Registers supported
+.It Sy mwaitx
+AMD MWAIT Extensions
+.It Sy nfpusg
+No FPU Segment Saving
+.It Sy node_id
+AMD Node ID MSR supported
+.It Sy nx
+No Executor page attribute supported
+.It Sy opmask
+Operation Mask Registers present
+.It Sy ospke
+OS Protection Keys Enabled
+.It Sy osvw
+AMD OS-Visible Workaround MSR supported
+.It Sy osxsave
+OS Extended State Save Enabled
+.It Sy pae
+Physical Address Extension
+.It Sy page1gb
+1GB Page Size supported
+.It Sy pat
+Page Attribute Table supported
+.It Sy pbe
+Pending Break Enable
+.It Sy pcid
+Process-Context Identifiers
+.It Sy pclmulqdq
+Packed Carry-Less Multiplication Quadword to Double Quadword (PCLMULQDQ)
+instruction
+.It Sy pconfig
+Platform Configuration (PCONFIG) instruction
+.It Sy pcxc
+Performance Counter Extensions (Core) supported
+.It Sy pdcm
+Perfmon and Debug Capability MSR (IA32_PERF_CAPABILITIES) supported
+.It Sy pge
+Page Global Enable
+.It Sy pku
+Protection Keys for Userspace supported
+.It Sy pnxc
+Performance Counter Extensions (Northbridge) supported
+.It Sy popcnt
+Population Count (POPCNT) instruction
+.It Sy pqe
+Platform QoS Enforcement supported
+.It Sy pqm
+Platform QoS Monitoring supported
+.It Sy prefetch
+Prefetch Data into L1 with Intent to Write (PREFETCHW) instruction
+.It Sy prefetchwt1
+Prefetch Vector Data with Intent to Write (PREFETCHWT1) instruction
+.It Sy proctrace
+Processor Trace support
+.It Sy pse
+Page Size Extensions
+.It Sy pse36
+36-bit Page Size Extensions
+.It Sy psn
+Processor Serial Number
+.It Sy ptsc
+Performance Time Stamp Counter supported
+.It Sy ptscel2i
+Performance Counter Extension for L2 Cache / Instruction Cache supported
+.It Sy rdpid
+Read Processor ID instruction
+.It Sy rdrand
+Read Random Number (RDRAND) instruction
+.It Sy rdseed
+Read Random Seed (RDSEED) instruction
+.It Sy rdtscp
+Read Time Stamp Counter and Processor ID (RDTSCP) instruction
+.It Sy rtm
+Restricted Transactional Memory instructions
+.It Sy sdbg
+Silicon Debugging MSR (IA32_DEBUG_INTERFACE) supported
+.It Sy sep
+Fast System Call Extensions (SYSENTER / SYSEXIT instructions)
+.It Sy sgx
+Software Guard Extensions supported
+.It Sy sgxlc
+Software Guard Extensions Launch Control supported
+.It Sy sha
+Secure Hash Algorithm instructions
+.It Sy skinit
+Secure Kernel Init supported
+.It Sy smap
+Supervisor Mode Access Prevention supported
+.It Sy smep
+Supervisor Mode Execution Prevention supported
+.It Sy smx
+Safer Mode Extensions supported
+.It Sy ss
+Self Snoop suppported
+.It Sy ssbd
+Speculative Store Bypass Disable supported
+.It Sy sse
+Streaming SIMD Extensions supported
+.It Sy sse2
+Streaming SIMD Extensions 2 supported
+.It Sy sse3
+Streaming SIMD Extensions 3 supported
+.It Sy sse4.1
+Streaming SIMD Extensions 4.1 supported
+.It Sy sse4.2
+Streaming SIMD Extensions 4.2 supported
+.It Sy sse4a
+AMD Streaming SIMD Extensions 4a supported
+.It Sy ssse3
+Supplemental Streaming SIMD Extension 3 supported
+.It Sy stibp
+Single Thread Indirect Branch Predictor supported
+.It Sy svm
+AMD Secure Virtual Machine supported
+.It Sy syscall
+SYSCALL / SYSRET instructions
+.It Sy tbm
+AMD Trailing Bit Manipulation instructions
+.It Sy tce
+AMD Translation Cache Extensions supported
+.It Sy tm
+Thermal Monitoring supported
+.It Sy tm2
+Thermal Monitoring 2 supported
+.It Sy tme
+Total Memory Encryption supported
+.It Sy topology
+AMD Topology Extensions supported
+.It Sy tsc
+Time Stamp Counter supported
+.It Sy tsc_adjust
+Time Stamp Counter Adjustment supported
+.It Sy tsc_invariant
+Invariant Time Stamp Counter supported
+.It Sy tscdlt
+Time Stamp Counter Deadline Timer supported
+.It Sy tsxfa
+TSX Force Abort supported
+.It Sy umip
+User-Mode Instruction Prevention supported
+.It Sy vaes
+Vector AES instruction
+.It Sy vme
+Virtual Mode Extensions supported
+.It Sy vmx
+Intel Virtual Machine Extensions supported
+.It Sy vpclmulqdq
+Vector Packed Carry-Less Multiplication Quadword to Double Quadword (VPCLMULQDQ)
+instruction
+.It Sy waitpkg
+Wait Package instructions
+.It Sy wbnoinvd
+Write Back / No Invalidate instruction
+.It Sy wdt
+AMD Watchdog Timer supported
+.It Sy x2apic
+2nd Generation Extended Advanced Programmable Interrupt Controller supported
+.It Sy x87
+x87 FPU Register State present
+.It Sy xinuse
+XSAVE In-Use State supported
+.It Sy xmm
+XMM (SSE) Register State present
+.It Sy xop
+AMD Extended Operations instructions
+.It Sy xsave
+Processor Extended State Save (XSAVE / XRSTOR) instructions
+.It Sy xsavec
+Processor Extended State Save with Compaction (XSAVEC) instruction
+.It Sy xsaveopt
+Processor Extended State Save Optimized (XSAVEOPT) instruction
+.It Sy xsaves
+Processor Extended State Save for Supervisor (XSAVES) instruction
+.It Sy xtpr
+Extended Task Priority Register supported
+.It Sy ymm_hi128
+YMM Registers Upper 128 Bits present
+.It Sy zmm_hi256
+ZMM Registers Upper 256 Bits present
+.El
+.It Va cpuid . Ns Va level
+The maximum
+.Sy CPUID
+function supported in the base set beginning at
+.Sy 0x00000000 .
+This value is returned in register
+.Sy EAX
+of function
+.Sy 0x00000000 .
+.It Va cpuid . Ns Va xlevel
+The maximum
+.Sy CPUID
+function supported in the extended set beginning at
+.Sy 0x80000000 .
+This value is returned in register
+.Sy EAX
+of function
+.Sy 0x80000000 .
+.It Va cpuid . Ns Va linear
+The number of linear
+.Pq virtual
+address space bits supported by the CPU.
+.It Va cpuid . Ns Va physical
+The number of physical address space bits supported by the CPU.
+.It Va cpuid . Ns Va pkgtype
+The socket type of the CPU.
+This is specific to AMD CPUs, and currently the only value supported is
+.Dq am3 .
+.It Va cpuid . Ns Ar function Ns Op , Ns Ar index
+A comma separated list of register operations to directly manipulate the
+raw register values returned by
+.Sy CPUID
+for a particular
+.Ar function
+and, optionally,
+.Ar index ,
+both specified as hexadecimal numbers starting with
+.Sq 0x .
+.Pp
+A register operation consists of the register name
+.Pq Sy eax , ebx , ecx , edx ,
+an assignment operator, an optional negation operator, and a 32-bit integer
+value in any notation understood by
+.Xr strtonumx 3 .
+There must be no spaces between these elements of a register operation.
+The following operators are supported:
+.Bl -tag -width indent
+.It Sy =
+Assignment, the register is assigned the given value.
+.It Sy |=
+Binary
+.Sy OR ,
+the bits set in the given value will be set in the register.
+.It Sy &=
+Binary
+.Sy AND ,
+the bits clear in the given value will be cleared in the register.
+.It Sy ~
+Binary NOT,
+inverts the bits of the given value.
+.El
+.Pp
+Any number of register operations can be chained together, separated by a comma.
+The register operations will be processed in the order specified.
 .El
 .Sh DEVICE SETTINGS
 Device settings are stored under a device node.
