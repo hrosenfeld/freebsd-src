@@ -2,6 +2,7 @@ BHYVE_GDB_SUPPORT=
 
 SRCS+=	\
 	atkbdc.c	\
+	cpuid.c		\
 	e820.c		\
 	fwctl.c		\
 	inout.c		\

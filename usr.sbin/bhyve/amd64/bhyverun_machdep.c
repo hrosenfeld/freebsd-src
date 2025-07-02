@@ -39,6 +39,7 @@
 #include "bhyverun.h"
 #include "bootrom.h"
 #include "config.h"
+#include "cpuid.h"
 #include "debug.h"
 #include "e820.h"
 #include "fwctl.h"
@@ -307,6 +308,7 @@ bhyve_init_vcpu(struct vcpu *vcpu)
 		exit(BHYVE_EXIT_ERROR);
 	}
 
+	bhyve_init_vcpu_cpuid_config(vcpu);
 	vm_set_capability(vcpu, VM_CAP_ENABLE_INVPCID, 1);
 
 	err = vm_set_capability(vcpu, VM_CAP_IPI_EXIT, 1);
