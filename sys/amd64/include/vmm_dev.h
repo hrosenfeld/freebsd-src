@@ -4,6 +4,8 @@
  * Copyright (c) 2011 NetApp, Inc.
  * All rights reserved.
  *
+ * Copyright (c) 2026 The FreeBSD Foundation
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -257,17 +259,22 @@ struct vm_vcpu_cpuid_config {
 	int		vvcc_vcpuid;
 	uint32_t	vvcc_flags;
 	uint32_t	vvcc_nent;
-	uint32_t	_pad;
-	void		*vvcc_entries;
+	uint32_t	vvcc_ent_sz;
+	struct vcpu_cpuid_entry	*vvcc_entries;
 };
 
 /* Query the computed legacy cpuid value for a vcpuid with VM_LEGACY_CPUID */
 struct vm_legacy_cpuid {
-	int		vlc_vcpuid;
-	uint32_t	vlc_eax;
-	uint32_t	vlc_ebx;
-	uint32_t	vlc_ecx;
-	uint32_t	vlc_edx;
+	int			 vlc_vcpuid;
+	union {
+		uint32_t	 vlc_regs[4];
+		struct {
+			uint32_t vlc_eax;
+			uint32_t vlc_ebx;
+			uint32_t vlc_ecx;
+			uint32_t vlc_edx;
+		};
+	};
 };
 
 enum {

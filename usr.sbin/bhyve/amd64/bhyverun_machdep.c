@@ -42,6 +42,7 @@
 #endif
 #include "bootrom.h"
 #include "config.h"
+#include "cpuid.h"
 #include "debug.h"
 #include "e820.h"
 #include "fwctl.h"
@@ -56,6 +57,8 @@
 #include "rtc.h"
 #include "smbiostbl.h"
 #include "xmsr.h"
+
+#define	CPU_MODEL_BASEDIR	"/usr/share/bhyve/cpu/"
 
 void
 bhyve_init_config(void)
@@ -119,10 +122,43 @@ bhyve_usage(int code)
 	exit(code);
 }
 
+static int
+bhyve_md_cpu_parse(const char *opt)
+{
+	char *cp, *str, *tofree;
+
+	if (opt == NULL)
+		return (0);
+
+	tofree = str = strdup(opt);
+	if (str == NULL)
+		errx(4, "Failed to allocate memory");
+
+	while ((cp = strsep(&str, ",")) != NULL) {
+		if (strncmp(cp, "model=", strlen("model=")) == 0) {
+			char *path;
+
+			if (asprintf(&path, CPU_MODEL_BASEDIR "%s.cfg",
+			    cp + strlen("model=")) == -1)
+				errx(4, "Failed to allocate memory");
+
+			bhyve_parse_simple_config_file(path);
+			free(path);
+			continue;
+		} else {
+			free(tofree);
+			return (-1);
+		}
+	}
+
+	free(tofree);
+	return (0);
+}
+
 void
 bhyve_optparse(int argc, char **argv)
 {
-	const char *optstr;
+	const char *optstr, *md_arg;
 	int c;
 
 #ifdef BHYVE_SNAPSHOT
@@ -152,9 +188,14 @@ bhyve_optparse(int argc, char **argv)
 			}
 			break;
 		case 'c':
-			if (bhyve_topology_parse(optarg) != 0) {
-			    errx(EX_USAGE, "invalid cpu topology "
-				"'%s'", optarg);
+			md_arg = bhyve_topology_parse(optarg);
+
+			if (md_arg == NULL)
+				break;
+
+			if (bhyve_md_cpu_parse(md_arg) != 0) {
+				errx(EX_USAGE, "invalid vcpu configuration "
+				    "'%s'", optarg);
 			}
 			break;
 		case 'C':
@@ -315,6 +356,11 @@ bhyve_init_vcpu(struct vcpu *vcpu)
 
 	err = vm_set_capability(vcpu, VM_CAP_IPI_EXIT, 1);
 	assert(err == 0);
+
+	err = bhyve_init_vcpu_cpuid_config(vcpu);
+	if (err) {
+		exit(4);
+	}
 }
 
 void

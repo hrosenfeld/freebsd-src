@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2011 NetApp, Inc.
+ * Copyright (c) 2026 The FreeBSD Foundation
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -82,7 +83,7 @@ void bhyve_parse_simple_config_file(const char *path);
 void bhyve_parse_gdb_options(const char *opt);
 #endif
 int bhyve_pincpu_parse(const char *opt);
-int bhyve_topology_parse(const char *opt);
+const char *bhyve_topology_parse(const char *opt);
 int bhyve_numa_parse(const char *opt);
 void bhyve_cfg_warn(const char *old, const char *new);
 

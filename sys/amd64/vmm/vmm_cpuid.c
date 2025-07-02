@@ -38,6 +38,11 @@
 #include <sys/types.h>
 #include <sys/errno.h>
 
+#include <vm/vm.h>
+#include <vm/vm_param.h>
+#include <vm/vm_object.h>
+#include <vm/pmap.h>
+
 #include <machine/clock.h>
 #include <machine/md_var.h>
 #include <machine/specialreg.h>
@@ -105,6 +110,16 @@ static MALLOC_DEFINE(M_CPUID, "cpuid", "cpuid");
 #define	CPUID_TYPE_EXTD	0x80000000
 
 static const struct vcpu_cpuid_entry cpuid_empty_entry = { 0 };
+
+/*
+ * Compute ceil(log2(x)).  Returns -1 if x is zero.
+ */
+static __inline int
+log2(uint64_t x)
+{
+
+	return (x == 0 ? -1 : order_base_2(x));
+}
 
 /*
  * Given the CPUID configuration for a vCPU, locate the entry which matches the
@@ -317,6 +332,16 @@ cpuid_apply_runtime_reg_state(struct vcpu *vcpu, uint32_t func,
 			break;
 		}
 		break;
+	case CPUID_8000_0008:
+		/*
+		 * Override the number of physical address space bits reported
+		 * to the guest.
+		 */
+		if ((*eax & 0xff) <= log2(VM_MAXUSER_ADDRESS_LA48 + 1)) {
+			*eax &= 0xffffff00;
+			*eax |= log2(VM_MAXUSER_ADDRESS_LA48 + 1) + 1;
+		}
+		break;
 	}
 }
 
@@ -497,16 +522,6 @@ SYSCTL_INT(_hw_vmm_topology, OID_AUTO, cpuid_leaf_b, CTLFLAG_RDTUN,
 static const char bhyve_id[12] = "bhyve bhyve ";
 
 /*
- * Compute ceil(log2(x)).  Returns -1 if x is zero.
- */
-static __inline int
-log2(u_int x)
-{
-
-	return (x == 0 ? -1 : order_base_2(x));
-}
-
-/*
  * The "legacy" bhyve cpuid emulation, which largly applies statically defined
  * masks to the data provided by the host CPU.
  */
@@ -568,8 +583,11 @@ legacy_emulate_cpuid(struct vcpu *vcpu, uint32_t *eax, uint32_t *ebx,
 		case CPUID_8000_0006:
 			cpuid_count(func, param, regs);
 			break;
+
 		case CPUID_8000_0008:
+			/* AMD Extended Features */
 			cpuid_count(func, param, regs);
+
 			if (vmm_is_svm()) {
 				/*
 				 * As on Intel (0000_0007:0, EDX), mask out
@@ -807,6 +825,7 @@ legacy_emulate_cpuid(struct vcpu *vcpu, uint32_t *eax, uint32_t *ebx,
 			/*
 			 * Hide the debug store capability.
 			 */
+			regs[2] &= ~CPUID2_DS_CPL;
 			regs[3] &= ~CPUID_DS;
 
 			/*
@@ -849,6 +868,7 @@ legacy_emulate_cpuid(struct vcpu *vcpu, uint32_t *eax, uint32_t *ebx,
 			break;
 
 		case CPUID_0000_0007:
+			/* Structured Extended Features */
 			regs[0] = 0;
 			regs[1] = 0;
 			regs[2] = 0;
@@ -906,18 +926,8 @@ legacy_emulate_cpuid(struct vcpu *vcpu, uint32_t *eax, uint32_t *ebx,
 			break;
 
 		case CPUID_0000_0006:
+			/* Thermal and Power Management */
 			regs[0] = CPUTPM1_ARAT;
-			regs[1] = 0;
-			regs[2] = 0;
-			regs[3] = 0;
-			break;
-
-		case CPUID_0000_000A:
-			/*
-			 * Handle the access, but report 0 for
-			 * all options
-			 */
-			regs[0] = 0;
 			regs[1] = 0;
 			regs[2] = 0;
 			regs[3] = 0;
@@ -967,6 +977,7 @@ legacy_emulate_cpuid(struct vcpu *vcpu, uint32_t *eax, uint32_t *ebx,
 			break;
 
 		case CPUID_0000_000D:
+			/* Processor Extended State Enumeration */
 			limits = vmm_get_xsave_limits();
 			if (!limits->xsave_enabled) {
 				regs[0] = 0;
@@ -1017,9 +1028,25 @@ legacy_emulate_cpuid(struct vcpu *vcpu, uint32_t *eax, uint32_t *ebx,
 			}
 			break;
 
+		/* Handle the access, but report 0 for all options */
+		case CPUID_0000_0005:
+			/* Monitor/MWAIT */
+		case CPUID_0000_0009:
+			/* Direct Cache Access Information */
+		case CPUID_0000_000A:
+			/* Architectural Performance Monitoring */
+			regs[0] = 0;
+			regs[1] = 0;
+			regs[2] = 0;
+			regs[3] = 0;
+			break;
+
+
 		case CPUID_0000_000F:
 		case CPUID_0000_0010:
 			/*
+			 * Intel Resource Director
+			 *
 			 * Do not report any Resource Director Technology
 			 * capabilities.  Exposing control of cache or memory
 			 * controller resource partitioning to the guest is not

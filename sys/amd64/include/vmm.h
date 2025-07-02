@@ -4,6 +4,8 @@
  * Copyright (c) 2011 NetApp, Inc.
  * All rights reserved.
  *
+ * Copyright (c) 2026 The FreeBSD Foundation
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -697,14 +699,28 @@ void vm_inject_pf(struct vcpu *vcpu, int error_code, uint64_t cr2);
  * Used internally by bhyve (kernel) in addition to exposed ioctl(2) interface.
  */
 struct vcpu_cpuid_entry {
-	uint32_t	vce_function;
-	uint32_t	vce_index;
-	uint32_t	vce_flags;
-	uint32_t	vce_eax;
-	uint32_t	vce_ebx;
-	uint32_t	vce_ecx;
-	uint32_t	vce_edx;
-	uint32_t	_pad;
+	uint32_t		 vce_function;
+	uint32_t		 vce_index;
+	uint32_t		 vce_flags;
+	union {
+		uint32_t	 vce_regs[4];
+		struct {
+			uint32_t vce_eax;
+			uint32_t vce_ebx;
+			uint32_t vce_ecx;
+			uint32_t vce_edx;
+		};
+	};
+	uint32_t		 _pad;
+};
+
+/* vcpu_cpuid_entry`vce_regs offsets */
+enum vce_reg {
+	VCE_REG_ANY = -1,
+	VCE_REG_EAX,
+	VCE_REG_EBX,
+	VCE_REG_ECX,
+	VCE_REG_EDX
 };
 
 /*
@@ -714,8 +730,17 @@ struct vcpu_cpuid_entry {
 /* Use index (ecx) input value when matching entry */
 #define	VCE_FLAG_MATCH_INDEX		(1 << 0)
 
-/* All valid flags for vcpu_cpuid_entry`vce_flags */
-#define	VCE_FLAGS_VALID		VCE_FLAG_MATCH_INDEX
+/* This entry is invalid and should be ignored */
+#define	VCE_FLAG_INVALID		(1 << 1)
+
+/* This entry has been modified by configuration */
+#define	VCE_FLAG_MODIFIED		(1 << 2)
+
+/*
+ * All valid flags for vcpu_cpuid_entry`vce_flags
+ * Note that this decidedly does not include the INVALID flag
+ */
+#define	VCE_FLAGS_VALID		(VCE_FLAG_MATCH_INDEX | VCE_FLAG_MODIFIED)
 
 /*
  * Defined flags for vcpu_cpuid configuration are below.
@@ -725,12 +750,22 @@ struct vcpu_cpuid_entry {
 
 /* Use legacy hard-coded cpuid masking tables applied to the host CPU */
 #define	VCC_FLAG_LEGACY_HANDLING	(1 << 0)
+
 /*
  * Emulate Intel-style fallback behavior (emit highest "standard" entry) if the
  * queried function/index do not match.  If not set, emulate AMD-style, where
  * all zeroes are returned in such cases.
  */
 #define	VCC_FLAG_INTEL_FALLBACK		(1 << 1)
+
+/*
+ * CPUID constraints check behavior
+ * CHECK SKIP: skip the constraints checks altogether
+ * CHECK WARN: warn about constraints check failure instead of failing
+ */
+#define	VCC_FLAG_CHECK_SKIP		(1 << 2)
+#define	VCC_FLAG_CHECK_WARN		(1 << 3)
+#define	VCC_FLAG_CHECK_FIX		(1 << 4)
 
 /* All valid flags for vm_vcpu_cpuid_config`vvcc_flags */
 #define	VCC_FLAGS_VALID		\
