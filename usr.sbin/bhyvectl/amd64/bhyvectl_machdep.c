@@ -32,6 +32,7 @@
 
 #include <machine/cpufunc.h>
 #include <machine/specialreg.h>
+#include <machine/vmm.h>
 
 #include <err.h>
 #include <fcntl.h>
@@ -42,6 +43,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <ctype.h>
 
 #include <vmmapi.h>
 #include "amd/vmcb.h"
@@ -94,6 +96,7 @@ static int get_gpa_pmap;
 static vm_paddr_t gpa_pmap;
 static int inject_nmi, assert_lapic_lvt = -1;
 static int get_intinfo;
+static int get_cpuid_cfg;
 static int set_cr0, get_cr0, set_cr2, get_cr2, set_cr3, get_cr3;
 static int set_cr4, get_cr4;
 static uint64_t set_cr0_val, set_cr2_val, set_cr3_val, set_cr4_val;
@@ -277,6 +280,55 @@ print_intinfo(const char *banner, uint64_t info)
 		printf("n/a");
 	}
 	printf("\n");
+}
+
+static void
+print_cpuid_header(void)
+{
+	printf("%10s, %5s  %10s %10s %10s %10s  %16s\n",
+	    "Function", "Index", "EAX", "EBX", "ECX", "EDX", "ASCII");
+}
+
+static void
+print_cpuid_entry(uint32_t leaf, uint32_t index, uint32_t flags,
+    const uint32_t *regs)
+{
+	const char *regbytes = (const char *)regs;
+
+	printf("0x%.8x", leaf);
+
+	if ((flags & VCE_FLAG_MATCH_INDEX) != 0)
+		printf(",0x%.3x:  ", index);
+	else
+		printf(":        ");
+
+	printf("0x%.8x,0x%.8x,0x%.8x,0x%.8x  ",
+	    regs[0], regs[1], regs[2], regs[3]);
+
+	for (int j = 0; j != 16; j++)
+		printf("%c", isprint(regbytes[j]) ? regbytes[j] : '.');
+
+	printf("\n");
+}
+
+static void
+print_cpuid_cfg(struct vm_vcpu_cpuid_config *vvcc)
+{
+	printf("CPUID configuration for vcpu %d: flags = 0x%x, nent = %d\n",
+	    vvcc->vvcc_vcpuid, vvcc->vvcc_flags, vvcc->vvcc_nent);
+
+	if (vvcc->vvcc_nent == 0)
+		return;
+
+	print_cpuid_header();
+
+	for (uint32_t i = 0; i != vvcc->vvcc_nent; i++) {
+		struct vcpu_cpuid_entry *vce =
+		    &((struct vcpu_cpuid_entry *)vvcc->vvcc_entries)[i];
+
+		print_cpuid_entry(vce->vce_function,
+		    vce->vce_index, vce->vce_flags, &vce->vce_eax);
+	}
 }
 
 /* AMD 6th generation and Intel compatible MSRs */
@@ -1218,6 +1270,7 @@ bhyvectl_opts(const struct option *options, size_t count)
 		{ "get-x2apic-state",	NO_ARG,	&get_x2apic_state,	1 },
 		{ "inject-nmi",		NO_ARG,	&inject_nmi,		1 },
 		{ "get-intinfo",	NO_ARG,	&get_intinfo,		1 },
+		{ "get-cpuid-cfg",	NO_ARG, &get_cpuid_cfg,		1 },
 	};
 	const struct option intel_opts[] = {
 		{ "get-vmcs-pinbased-ctls",
@@ -1884,6 +1937,34 @@ bhyvectl_md_main(struct vmctx *ctx, struct vcpu *vcpu, int vcpuid, bool get_all)
 		if (!error) {
 			print_intinfo("pending", info[0]);
 			print_intinfo("current", info[1]);
+		}
+	}
+
+	if (!error && (get_cpuid_cfg || get_all)) {
+		struct vm_vcpu_cpuid_config vvcc = {
+			.vvcc_vcpuid = 0, /* filled in by the ioctl code */
+			.vvcc_flags = 0,
+			.vvcc_nent = 0,
+			.vvcc_entries = NULL
+		};
+
+		/*
+		 * Get the flags and the number of configured CPUID entries,
+		 * and allocate a buffer for the entries if necessary.
+		 */
+		error = vm_get_cpuid(vcpu, &vvcc);
+		if (error == 0 && vvcc.vvcc_nent != 0) {
+			vvcc.vvcc_entries = calloc(vvcc.vvcc_nent,
+			    sizeof(struct vcpu_cpuid_entry));
+			if (vvcc.vvcc_entries == NULL)
+				err(1, "calloc");
+
+			/* Call vm_get_cpuid() again to get the full config. */
+			error = vm_get_cpuid(vcpu, &vvcc);
+
+			if (error == 0) {
+				print_cpuid_cfg(&vvcc);
+			}
 		}
 	}
 }
