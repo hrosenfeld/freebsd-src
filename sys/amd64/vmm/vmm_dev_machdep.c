@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2011 NetApp, Inc.
+ * Copyright (c) 2026 Hans Rosenfeld
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -569,6 +570,13 @@ vmmdev_machdep_ioctl(struct vm *vm, struct vcpu *vcpu, u_long cmd, caddr_t data,
 				free(entries, M_VMMDEV);
 				break;
 			}
+		} else {
+			/*
+			 * Not using "legacy" handling and no cpuid entries
+			 * given isn't allowed either.
+			 */
+			error = EINVAL;
+			break;
 		}
 
 		vcpu_cpuid_config_t vm_cfg = {
