@@ -165,6 +165,10 @@ usage(const struct option *opts)
 			(void)fprintf(stderr, "       [--%s=<%s>]\n", o->name,
 			    o->val >= OPT_START_MD ? bhyvectl_opt_desc(o->val) :
 			    set_desc[o->val]);
+		} else if (o->has_arg == OPT_ARG) {
+			(void)fprintf(stderr, "       [--%s[=%s]\n", o->name,
+			    o->val >= OPT_START_MD ? bhyvectl_opt_desc(o->val) :
+			    set_desc[o->val]);
 		} else {
 			(void)fprintf(stderr, "       [--%s]\n", o->name);
 		}
