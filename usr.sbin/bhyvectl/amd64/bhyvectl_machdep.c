@@ -38,6 +38,7 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -85,6 +86,7 @@ enum {
 	SET_RTC_TIME,
 	SET_RTC_NVRAM,
 	RTC_NVRAM_OFFSET,
+	GET_CPUID,
 };
 
 static int get_rtc_time, set_rtc_time;
@@ -97,6 +99,12 @@ static vm_paddr_t gpa_pmap;
 static int inject_nmi, assert_lapic_lvt = -1;
 static int get_intinfo;
 static int get_cpuid_cfg;
+static int get_cpuid;
+static int get_cpuid_all;
+static int get_cpuid_parsable;
+static int get_cpuid_sparse;
+static uint32_t get_cpuid_leaf;
+static uint32_t get_cpuid_index;
 static int set_cr0, get_cr0, set_cr2, get_cr2, set_cr3, get_cr3;
 static int set_cr4, get_cr4;
 static uint64_t set_cr0_val, set_cr2_val, set_cr3_val, set_cr4_val;
@@ -285,28 +293,49 @@ print_intinfo(const char *banner, uint64_t info)
 static void
 print_cpuid_header(void)
 {
+	if (get_cpuid_parsable != 0)
+		return;
+
 	printf("%10s, %5s  %10s %10s %10s %10s  %16s\n",
 	    "Function", "Index", "EAX", "EBX", "ECX", "EDX", "ASCII");
 }
 
 static void
-print_cpuid_entry(uint32_t leaf, uint32_t index, uint32_t flags,
+print_cpuid_entry(int vcpuid, uint32_t leaf, uint32_t index, uint32_t max_index,
     const uint32_t *regs)
 {
 	const char *regbytes = (const char *)regs;
 
-	printf("0x%.8x", leaf);
+	if (get_cpuid_parsable != 0) {
+		if (regs[0] == 0 && regs[1] == 0 && regs[2] == 0 && regs[3] == 0)
+			return;
 
-	if ((flags & VCE_FLAG_MATCH_INDEX) != 0)
-		printf(",0x%.3x:  ", index);
-	else
-		printf(":        ");
+		if (vcpuid != 0 || get_cpuid_sparse == 0)
+			printf("vcpu.%d.", vcpuid);
+
+		printf("cpuid.");
+	}
+
+	printf("0x%.8x", leaf);
+	if (max_index > 0)
+		printf(",0x%.3x", index);
+
+	if (get_cpuid_parsable != 0) {
+		printf("=");
+	} else {
+		if (max_index > 0)
+			printf(":  ");
+		else
+			printf(":        ");
+	}
 
 	printf("0x%.8x,0x%.8x,0x%.8x,0x%.8x  ",
 	    regs[0], regs[1], regs[2], regs[3]);
 
-	for (int j = 0; j != 16; j++)
-		printf("%c", isprint(regbytes[j]) ? regbytes[j] : '.');
+	if (get_cpuid_parsable == 0) {
+		for (int j = 0; j != 16; j++)
+			printf("%c", isprint(regbytes[j]) ? regbytes[j] : '.');
+	}
 
 	printf("\n");
 }
@@ -326,9 +355,207 @@ print_cpuid_cfg(struct vm_vcpu_cpuid_config *vvcc)
 		struct vcpu_cpuid_entry *vce =
 		    &((struct vcpu_cpuid_entry *)vvcc->vvcc_entries)[i];
 
-		print_cpuid_entry(vce->vce_function,
+		print_cpuid_entry(vvcc->vvcc_vcpuid, vce->vce_function,
 		    vce->vce_index, vce->vce_flags, &vce->vce_eax);
 	}
+}
+
+static bool
+cpuid_0x0000000d_index_valid(struct vcpu *vcpu, uint32_t leaf, uint32_t index)
+{
+	/*
+	 * Leaf 0x0000000d is quite special.
+	 *
+	 * Indices 0 and 1 are always valid.
+	 *
+	 * For indices 2-31, the index is valid if the corresponding
+	 * bits of either EAX of index 0 or ECX of index 1 are set.
+	 *
+	 * For indices 32-64, the index is valid if the corresponding
+	 * bits of EDX of either index 0 or index 1 are valid. The
+	 * corresponding bits are index - 32.
+	 */
+	struct vm_legacy_cpuid vlc;
+	uint32_t *regs;
+	int error;
+	int reg = 0;
+
+	if (index == 0 || index == 1)
+		return (true);
+
+	if (index >= 32) {
+		reg = 3;
+		index -= 32;
+	}
+
+	bzero(&vlc, sizeof(vlc));
+	vlc.vlc_eax = leaf;
+	vlc.vlc_ecx = 0;
+	error = vm_legacy_cpuid(vcpu, &vlc);
+	if (error != 0)
+		return (false);
+
+	regs = &vlc.vlc_eax;
+	if ((regs[reg] & (1 << index)) != 0)
+		return (true);
+
+	bzero(&vlc, sizeof(vlc));
+	vlc.vlc_eax = leaf;
+	vlc.vlc_ecx = 1;
+	error = vm_legacy_cpuid(vcpu, &vlc);
+	if (error != 0)
+		return (false);
+
+	regs = &vlc.vlc_eax;
+	if (reg != 3)
+		reg = 2;
+
+	return ((regs[reg] & (1 << index)) != 0);
+}
+
+static bool
+cpuid_index_valid(struct vcpu *vcpu, uint32_t leaf, uint32_t index,
+    const uint32_t *regs)
+{
+	struct {
+		uint32_t leaf;
+		int reg;
+		uint32_t mask;
+	} leaves[] = {
+		{ 0x00000004, 0, 0x1f },
+		{ 0x0000000b, 2, 0xff00 },
+		{ 0x00000012, 0, 0xf },
+		{ 0x0000001b, 0, 0xfff },
+		{ 0x0000001f, 2, 0xff00 },
+		{ 0x8000001d, 0, 0x1f },
+		{ 0x80000026, 1, 0xffff },
+	};
+
+	if (leaf == 0x0000000d) {
+		return (cpuid_0x0000000d_index_valid(vcpu, leaf, index));
+	}
+
+	if (leaf == 0x00000010) {
+		/* valid if corresponding bit in EBX of index 0 is set */
+		return ((regs[1] & (1 << index)) != 0);
+	}
+
+	for (int i = 0; i != nitems(leaves); i++) {
+		if (leaves[i].leaf == leaf) {
+			return ((regs[leaves[i].reg] & leaves[i].mask) != 0);
+		}
+	}
+
+	return (true);
+}
+
+static uint32_t
+cpuid_max_index(uint32_t leaf, const uint32_t *regs)
+{
+	int i;
+
+	struct {
+		uint32_t leaf;
+		uint32_t static_max_index;
+	} leaves[] = {
+		{ 0x00000004, 0x01f },
+		{ 0x0000000b, 0x001 },
+		{ 0x0000000d, 0x03f },
+		{ 0x00000010, 0x003 },
+		{ 0x00000012, 0x01f },
+		{ 0x0000001b, 0x01f },
+		{ 0x0000001f, 0x005 },
+		{ 0x8000001d, 0x01f },
+		{ 0x80000026, 0x003 },
+	};
+
+	if (leaf == 0x00000017 || leaf == 0x00000018) {
+		/* max. index is in EAX of index 0 */
+		return (regs[0]);
+	}
+
+	for (i = 0; i != nitems(leaves); i++) {
+		if (leaves[i].leaf == leaf) {
+			return (leaves[i].static_max_index);
+		}
+	}
+
+	return (0);
+}
+
+static int
+print_cpuid_all(struct vmctx *ctx, struct vcpu *vcpu, int vcpuid, uint32_t leaf)
+{
+	struct vcpu *vcpu0 = NULL;
+	bool match = false;
+	uint32_t high = 0;
+	struct vm_legacy_cpuid vlc0, vlc_vcpu0;
+	int error;
+
+	bzero(&vlc0, sizeof(vlc0));
+	vlc0.vlc_eax = leaf;
+	error = vm_legacy_cpuid(vcpu, &vlc0);
+	if (error != 0)
+		return (error);
+
+	if (get_cpuid_sparse == 1 && vcpuid != 0) {
+		vcpu0 = vm_vcpu_open(ctx, 0);
+		if (vcpu0 == NULL)
+			return (-1);
+
+		bzero(&vlc_vcpu0, sizeof(vlc_vcpu0));
+		vlc_vcpu0.vlc_eax = leaf;
+		error = vm_legacy_cpuid(vcpu0, &vlc_vcpu0);
+		if (error != 0)
+			return (error);
+		match = (0 == memcmp(&vlc0.vlc_eax, &vlc_vcpu0.vlc_eax,
+		    sizeof(uint32_t) * 4));
+	} else {
+		match = false;
+	}
+
+	if (!match)
+		print_cpuid_entry(vcpuid, leaf, 0, 0, &vlc0.vlc_eax);
+
+	high = vlc0.vlc_eax;
+	for (leaf += 1; leaf <= high; leaf++) {
+		uint32_t max_index = cpuid_max_index(leaf, &vlc0.vlc_eax);
+		uint32_t index;
+
+		for (index = 0; index <= max_index; index++) {
+			struct vm_legacy_cpuid vlc;
+
+			bzero(&vlc, sizeof(vlc));
+			vlc.vlc_eax = leaf;
+			vlc.vlc_ecx = index;
+
+			error = vm_legacy_cpuid(vcpu, &vlc);
+			if (error != 0)
+				return (error);
+
+			if (!cpuid_index_valid(vcpu, leaf, index, &vlc.vlc_eax))
+				continue;
+
+			if (get_cpuid_sparse == 1 && vcpuid != 0) {
+				bzero(&vlc_vcpu0, sizeof(vlc_vcpu0));
+				vlc_vcpu0.vlc_eax = leaf;
+				vlc_vcpu0.vlc_ecx = index;
+				error = vm_legacy_cpuid(vcpu0, &vlc_vcpu0);
+				if (error != 0)
+					return (error);
+				match = (0 == memcmp(&vlc.vlc_eax,
+				    &vlc_vcpu0.vlc_eax, sizeof(uint32_t) * 4));
+			} else {
+				match = false;
+			}
+
+			if (!match) {
+				print_cpuid_entry(vcpuid, leaf, index,
+				    max_index, &vlc.vlc_eax);
+			}
+		}
+	}
+	return (0);
 }
 
 /* AMD 6th generation and Intel compatible MSRs */
@@ -1271,6 +1498,7 @@ bhyvectl_opts(const struct option *options, size_t count)
 		{ "inject-nmi",		NO_ARG,	&inject_nmi,		1 },
 		{ "get-intinfo",	NO_ARG,	&get_intinfo,		1 },
 		{ "get-cpuid-cfg",	NO_ARG, &get_cpuid_cfg,		1 },
+		{ "get-cpuid",		OPT_ARG, 0,	GET_CPUID },
 	};
 	const struct option intel_opts[] = {
 		{ "get-vmcs-pinbased-ctls",
@@ -1518,6 +1746,50 @@ bhyvectl_handle_opt(const struct option *opts, int opt)
 	case ASSERT_LAPIC_LVT:
 		assert_lapic_lvt = atoi(optarg);
 		break;
+	case GET_CPUID:
+		get_cpuid_all = 1;
+
+		if (optarg != NULL) {
+			const char *errstr;
+			char *leaf, *idx;
+
+			idx = optarg;
+			leaf = strsep(&idx, ",");
+
+			if (strcmp(leaf, "all") == 0) {
+				if (idx != NULL) {
+					if (strcmp(idx, "p") == 0) {
+						get_cpuid_parsable = 1;
+					}
+
+					if (strcmp(idx, "s") == 0) {
+						get_cpuid_parsable = 1;
+						get_cpuid_sparse = 1;
+					}
+
+					if (get_cpuid_parsable != 1) {
+						usage(opts);
+					}
+				}
+				break;
+			}
+
+			get_cpuid_leaf =
+			    strtonumx(leaf, 0, UINT32_MAX, &errstr, 16);
+			if (errstr != NULL)
+				usage(opts);
+
+			if (idx != NULL) {
+				get_cpuid_index = strtonumx(idx, 0,
+				    UINT32_MAX, &errstr, 16);
+				if (errstr != NULL)
+					usage(opts);
+			}
+
+			get_cpuid_all = 0;
+			get_cpuid = 1;
+		}
+		break;
 	}
 }
 
@@ -1591,6 +1863,8 @@ bhyvectl_opt_desc(int opt)
 		return ("val");
 	case RTC_NVRAM_OFFSET:
 		return ("offset");
+	case GET_CPUID:
+		return ("{<function>[,<index>]|all[,{p|s}]}");
 	default:
 		return ("???");
 	}
@@ -1964,6 +2238,56 @@ bhyvectl_md_main(struct vmctx *ctx, struct vcpu *vcpu, int vcpuid, bool get_all)
 
 			if (error == 0) {
 				print_cpuid_cfg(&vvcc);
+			}
+		}
+	}
+
+	if (!error && get_cpuid) {
+		struct vm_legacy_cpuid vlc;
+
+		bzero(&vlc, sizeof(vlc));
+		vlc.vlc_eax = get_cpuid_leaf;
+
+		error = vm_legacy_cpuid(vcpu, &vlc);
+		if (error == 0) {
+			uint32_t max_index = cpuid_max_index(get_cpuid_leaf,
+			    &vlc.vlc_eax);
+
+			if (get_cpuid_index == 0) {
+				print_cpuid_header();
+				print_cpuid_entry(vcpuid, get_cpuid_leaf,
+				    get_cpuid_index, max_index,	&vlc.vlc_eax);
+			} else if (get_cpuid_index <= max_index &&
+			    cpuid_index_valid(vcpu, get_cpuid_leaf,
+			    get_cpuid_index, &vlc.vlc_eax)) {
+				bzero(&vlc, sizeof(vlc));
+				vlc.vlc_eax = get_cpuid_leaf;
+				vlc.vlc_ecx = get_cpuid_index;
+
+				error = vm_legacy_cpuid(vcpu, &vlc);
+				if (error == 0) {
+					print_cpuid_header();
+					print_cpuid_entry(vcpuid,
+					    get_cpuid_leaf, get_cpuid_index,
+					    max_index, &vlc.vlc_eax);
+				}
+			}
+		}
+	}
+
+	if (!error && (get_cpuid_all || get_all)) {
+		print_cpuid_header();
+
+		error = print_cpuid_all(ctx, vcpu, vcpuid, 0x00000000);
+		if (error == 0) {
+			error = print_cpuid_all(ctx, vcpu, vcpuid, 0x40000000);
+			if (error == 0) {
+				error = print_cpuid_all(ctx, vcpu, vcpuid,
+				    0x40000100);
+				if (error == 0) {
+					error = print_cpuid_all(ctx, vcpu,
+					    vcpuid, 0x80000000);
+				}
 			}
 		}
 	}
