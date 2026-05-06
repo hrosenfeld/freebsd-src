@@ -724,6 +724,65 @@ do_open(const char *vmname)
 	return (ctx);
 }
 
+/*
+ * Handle special "include" config file directive:
+ * include <path>
+ *
+ * We insist on "include" being separated from <path> by at
+ * least one space or tab character. sscanf() will set 'off'
+ * accordingly only on a match of the initial string.
+ *
+ * If <path> is not absolute, it'll be looked for in the same
+ * directory as the config file containing the 'include'
+ * directive.
+ */
+static bool
+bhyve_parse_include_option(const char *path, const char *option)
+{
+	size_t len = PATH_MAX + 1;
+	size_t off = 0;
+	char *include_dir;
+	char *include_path;
+
+	(void) sscanf(option, "include%*[ \t]%zn%*s", &off);
+	if (off < strlen("include "))
+		return (false);
+
+	include_dir = calloc(len, sizeof(char));
+	if (include_dir == NULL)
+		err(4, "Failed to allocate memory");
+
+	if (option[off] != '/') {
+		if (strlcat(include_dir, path, len) >= len)
+			errx(4, "Overlong path %s", path);
+
+		(void) dirname(include_dir);
+		len = pathconf(include_dir, _PC_PATH_MAX);
+
+		include_dir = reallocf(include_dir, len);
+		if (include_dir == NULL)
+			err(4, "Failed to allocate memory");
+
+		if (strlcat(include_dir, "/", len) >= len)
+			errx(4, "Overlong path %s", include_dir);
+	}
+
+	if (strlcat(include_dir, &option[off], len) >= len)
+		errx(4, "Overlong path %s", include_dir);
+
+	include_path = realpath(include_dir, NULL);
+
+	if (include_path == NULL)
+		err(4, "Invalid configuration file path %s/%s",
+		    include_dir, &option[off]);
+
+	bhyve_parse_simple_config_file(include_path);
+	free(include_path);
+	free(include_dir);
+
+	return (true);
+}
+
 bool
 bhyve_parse_config_option(const char *option)
 {
@@ -761,9 +820,15 @@ bhyve_parse_simple_config_file(const char *path)
 		cp = strchr(line, '\n');
 		if (cp != NULL)
 			*cp = '\0';
-		if (!bhyve_parse_config_option(line))
-			errx(4, "%s line %u: invalid config option '%s'", path,
-			    lineno, line);
+
+		if (bhyve_parse_include_option(path, line))
+			continue;
+
+		if (bhyve_parse_config_option(line))
+			continue;
+
+		errx(4, "%s line %u: invalid config option '%s'", path,
+		    lineno, line);
 	}
 	free(line);
 	fclose(fp);
