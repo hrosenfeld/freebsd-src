@@ -786,16 +786,26 @@ bhyve_parse_include_option(const char *path, const char *option)
 bool
 bhyve_parse_config_option(const char *option)
 {
+	bool append = false;
 	const char *value;
 	char *path;
 
 	value = strchr(option, '=');
-	if (value == NULL || value[1] == '\0')
+	if (value == NULL || value[1] == '\0' || value == option)
 		return (false);
-	path = strndup(option, value - option);
+
+	if (value[-1] == '+')
+		append = true;
+
+	path = strndup(option, value - option - (append ? 1 : 0));
 	if (path == NULL)
 		err(4, "Failed to allocate memory");
-	set_config_value(path, value + 1);
+
+	if (append)
+		append_config_value(path, value + 1);
+	else
+		set_config_value(path, value + 1);
+
 	free(path);
 	return (true);
 }

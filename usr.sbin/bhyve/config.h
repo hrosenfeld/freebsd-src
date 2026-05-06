@@ -124,6 +124,13 @@ void	set_config_value(const char *path, const char *value);
 void 	set_config_value_if_unset(const char *const path,
     const char *const value);
 
+/*
+ * Similar to set_config_value but appends value to the existing value,
+ * separated by a comma.
+ */
+void 	append_config_value(const char *const path,
+    const char *const value);
+
 /* Convenience wrappers for boolean variables. */
 bool	get_config_bool(const char *path);
 bool	get_config_bool_node(const nvlist_t *parent, const char *name);
