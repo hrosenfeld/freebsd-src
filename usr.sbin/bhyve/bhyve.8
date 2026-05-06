@@ -3,6 +3,7 @@
 .\"
 .\" Copyright (c) 2013 Peter Grehan
 .\" Copyright (c) 2026 Hans Rosenfeld
+.\" Copyright (c) 2026 The FreeBSD Foundation
 .\" All rights reserved.
 .\"
 .\" Redistribution and use in source and binary forms, with or without
@@ -224,19 +225,39 @@ This option applies only to the amd64 platform.
 .It Fl h
 Print help message and exit.
 .It Fl k Ar config_file
-Set configuration variables from a simple, key-value config file.
-Each line of the config file is expected to consist of a config variable
-name, an equals sign
+Set configuration variables from the given configuration file.
+.Pp
+Blank lines and lines starting with
+.Sq #
+are ignored.
+.Pp
+Configuration files may include other configuration files with the special
+directive
+.Sq Cm include
+followed by a whitespace and the path name of the other configuration file.
+The included configuration file will be parsed in place of the
+.Sq Cm include
+directive.
+The path may be absolute or relative to the configuration file containing
+the
+.Sq Cm include
+directive.
+.Pp
+Other than that, each line of the config file is expected to consist of a
+config variable name, an equals sign
 .Pq Sq = ,
 and a value.
 No spaces are permitted between the variable name, equals sign, or
 value.
-Blank lines and lines starting with
-.Sq #
-are ignored.
+.Pp
 See
 .Xr bhyve_config 5
 for more details.
+.Pp
+Multiple configuration files can be specified by using
+.Fl k
+more than once.
+Configuration files will be read in the order given.
 .It Fl K Ar layout
 Specify the keyboard layout.
 The value that can be specified sets the file name in

@@ -2,6 +2,7 @@
 .\"
 .\" Copyright (c) 2021 John H. Baldwin <jhb@FreeBSD.org>
 .\" Copyright (c) 2026 Hans Rosenfeld
+.\" Copyright (c) 2026 The FreeBSD Foundation
 .\"
 .\" Redistribution and use in source and binary forms, with or without
 .\" modification, are permitted provided that the following conditions
@@ -29,14 +30,29 @@
 .Os
 .Sh NAME
 .Nm bhyve_config
-.Nd bhyve configuration variables
+.Nd bhyve configuration file format and variables
 .Sh DESCRIPTION
 .Xr bhyve 8
 uses a hierarchical tree of configuration variables to describe global and
 per-device settings.
 Internal nodes in this tree do not have a value,
 only leaf nodes have values.
-This manual describes the configuration variables understood by
+.Pp
+These configuration variables can be assigned directly on the command line
+or in a configuration file, one per line.
+Besides variable assignments, a configuration file may contain special
+directives, empty lines, or lines beginning with a
+.Qq #
+character, which are treated as comments.
+.Pp
+The only special directive currently supported is
+.Sy include ,
+which takes the path of another configuration file as argument, which is parsed
+as any other configuration file.
+The path to the configuration file to be included may be absolute, or relative
+to the directory of the configuration file currently being processed.
+.Pp
+The remainder of this manual describes the configuration variables understood by
 .Xr bhyve 8 .
 If additional variables are defined,
 .Xr bhyve 8
