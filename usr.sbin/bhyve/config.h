@@ -3,6 +3,7 @@
  *
  * Copyright (c) 2021 John H. Baldwin <jhb@FreeBSD.org>
  * Copyright 2026 Hans Rosenfeld
+ * Copyright (c) 2026 The FreeBSD Foundation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -122,6 +123,13 @@ void	set_config_value(const char *path, const char *value);
  * Similar to set_config_value but only sets the value if it's unset yet.
  */
 void 	set_config_value_if_unset(const char *const path,
+    const char *const value);
+
+/*
+ * Similar to set_config_value but appends value to the existing value,
+ * separated by a comma.
+ */
+void 	append_config_value(const char *const path,
     const char *const value);
 
 /* Convenience wrappers for boolean variables. */

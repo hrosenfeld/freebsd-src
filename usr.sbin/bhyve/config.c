@@ -233,6 +233,24 @@ get_raw_config_value(const char *path)
 	return (NULL);
 }
 
+void
+append_config_value(const char *path, const char *value)
+{
+	const char *old_value = get_raw_config_value(path);
+	char *new_value;
+
+	if (old_value == NULL)
+		new_value = strdup(value);
+	else
+		(void) asprintf(&new_value, "%s,%s", old_value, value);
+
+	if (new_value == NULL)
+		err(4, "Failed to allocate memory");
+
+	set_config_value(path, new_value);
+	free(new_value);
+}
+
 static char *
 _expand_config_value(const char *value, int depth)
 {
