@@ -52,6 +52,24 @@ as any other configuration file.
 The path to the configuration file to be included may be absolute, or relative
 to the directory of the configuration file currently being processed.
 .Pp
+The values assigned to nodes are represented internally as strings and include
+all whitespace, quotation marks, and other special characters specified between
+the assignment operator and the next newline.
+.Pp
+Assignment takes one of the following forms:
+.Bl -column "Operator" "config.node+=value" "Description"
+.It Sy Operator Ta Sy Example Ta Sy Description
+.It Vt = Ta Va config.node Ns Vt = Ns Va value Ta
+The value is assigned to the specified node.
+If the node already has a value assigned, the new value overwrites the existing
+value.
+.It Vt += Ta Va config.node Ns Vt += Ns Va value Ta
+The value is assigned to the specified node.
+If the node already has a value assigned, the new value is appended to the
+existing value separated by a comma, allowing the incremental construction of
+comma-separated lists.
+.El
+.Pp
 The remainder of this manual describes the configuration variables understood by
 .Xr bhyve 8 .
 If additional variables are defined,
