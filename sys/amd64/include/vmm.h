@@ -696,15 +696,23 @@ void vm_inject_pf(struct vcpu *vcpu, int error_code, uint64_t cr2);
  * Used internally by bhyve (kernel) in addition to exposed ioctl(2) interface.
  */
 struct vcpu_cpuid_entry {
-	uint32_t	vce_function;
-	uint32_t	vce_index;
-	uint32_t	vce_flags;
-	uint32_t	vce_eax;
-	uint32_t	vce_ebx;
-	uint32_t	vce_ecx;
-	uint32_t	vce_edx;
-	uint32_t	_pad;
+	uint32_t		 vce_function;
+	uint32_t		 vce_index;
+	uint32_t		 vce_flags;
+	union {
+		uint32_t	 vce_regs[4];
+		struct {
+			uint32_t vce_eax;
+			uint32_t vce_ebx;
+			uint32_t vce_ecx;
+			uint32_t vce_edx;
+		};
+	};
+	uint32_t		 _pad;
 };
+
+/* vcpu_cpuid_entry`vce_regs offsets */
+enum vce_reg { VCE_REG_EAX, VCE_REG_EBX, VCE_REG_ECX, VCE_REG_EDX };
 
 /*
  * Defined flags for vcpu_cpuid_entry`vce_flags are below.
@@ -713,8 +721,17 @@ struct vcpu_cpuid_entry {
 /* Use index (ecx) input value when matching entry */
 #define	VCE_FLAG_MATCH_INDEX		(1 << 0)
 
-/* All valid flags for vcpu_cpuid_entry`vce_flags */
-#define	VCE_FLAGS_VALID		VCE_FLAG_MATCH_INDEX
+/* This entry is invalid and should be ignored */
+#define	VCE_FLAG_INVALID		(1 << 1)
+
+/* This entry has been modified by configuration */
+#define	VCE_FLAG_MODIFIED		(1 << 2)
+
+/*
+ * All valid flags for vcpu_cpuid_entry`vce_flags
+ * Note that this decidedly does not include the INVALID flag
+ */
+#define	VCE_FLAGS_VALID		(VCE_FLAG_MATCH_INDEX | VCE_FLAG_MODIFIED)
 
 /*
  * Defined flags for vcpu_cpuid configuration are below.

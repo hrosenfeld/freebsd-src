@@ -135,7 +135,7 @@ static cpuset_t **vcpumap;
  * The acceptance of a null specification ('-c ""') is by design to match the
  * manual page syntax specification, this results in a topology of 1 vCPU.
  */
-int
+const char *
 bhyve_topology_parse(const char *opt)
 {
 	char *cp, *str, *tofree;
@@ -145,7 +145,7 @@ bhyve_topology_parse(const char *opt)
 		set_config_value("cores", "1");
 		set_config_value("threads", "1");
 		set_config_value("cpus", "1");
-		return (0);
+		return (NULL);
 	}
 
 	tofree = str = strdup(opt);
@@ -162,16 +162,12 @@ bhyve_topology_parse(const char *opt)
 		else if (strncmp(cp, "threads=", strlen("threads=")) == 0)
 			set_config_value("threads", cp + strlen("threads="));
 		else if (strchr(cp, '=') != NULL)
-			goto out;
+			break;
 		else
 			set_config_value("cpus", cp);
 	}
 	free(tofree);
-	return (0);
-
-out:
-	free(tofree);
-	return (-1);
+	return (cp == NULL ? NULL : opt + (cp - tofree));
 }
 
 static int
@@ -1006,8 +1002,6 @@ main(int argc, char *argv[])
 		exit(BHYVE_EXIT_ERROR);
 	}
 
-	bhyve_init_vcpu(bsp);
-
 	/* Allocate per-VCPU resources. */
 	vcpu_info = calloc(guest_ncpus, sizeof(*vcpu_info));
 	for (int vcpuid = 0; vcpuid < guest_ncpus; vcpuid++) {
@@ -1024,6 +1018,8 @@ main(int argc, char *argv[])
 			exit(BHYVE_EXIT_ERROR);
 		}
 	}
+
+	bhyve_init_vcpu(bsp);
 
 	if (bhyve_init_platform(ctx, bsp) != 0)
 		exit(BHYVE_EXIT_ERROR);

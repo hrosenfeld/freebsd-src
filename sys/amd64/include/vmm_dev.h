@@ -257,8 +257,8 @@ struct vm_vcpu_cpuid_config {
 	int		vvcc_vcpuid;
 	uint32_t	vvcc_flags;
 	uint32_t	vvcc_nent;
-	uint32_t	_pad;
-	void		*vvcc_entries;
+	uint32_t	vvcc_ent_sz;
+	struct vcpu_cpuid_entry	*vvcc_entries;
 };
 
 /* Query the computed legacy cpuid value for a vcpuid with VM_LEGACY_CPUID */

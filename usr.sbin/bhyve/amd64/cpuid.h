@@ -31,6 +31,6 @@
 
 struct vcpu;
 
-void bhyve_init_vcpu_cpuid_config(struct vcpu *);
+int bhyve_init_vcpu_cpuid_config(struct vcpu *);
 
 #endif	/* _CPUID_H */
