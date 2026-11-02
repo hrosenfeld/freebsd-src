@@ -26,12 +26,12 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd October 24, 2026
+.Dd November 2, 2026
 .Dt BHYVE 8
 .Os
 .Sh NAME
 .Nm bhyve
-.Nd "run a guest operating system inside a virtual machine"
+.Nd run a guest operating system inside a virtual machine
 .Sh SYNOPSIS
 .Nm
 .Op Fl aCDeHhMNPSuWwxY
@@ -39,7 +39,7 @@
 .Sm off
 .Fl c\~
 .Oo
-.Op Cm cpus=
+.Op Cm cpus Ns \&=
 .Ar numcpus
 .Oc
 .Op Cm ,sockets= Ar n
@@ -49,13 +49,12 @@
 .Sm on
 .Sm off
 .Oo Fl f\~
-.Ar name Cm \&,
-.Oo
-.Cm string No | Cm file
+.Op Cm name =
+.Ar name ,
+.Cm string = Ar data |
+.Cm file = Ar path
 .Oc
-.Cm \&= Ar data
 .Sm on
-.Oc
 .Oo
 .Sm off
 .Fl G\~
@@ -185,16 +184,20 @@ Force
 .Nm
 to exit when a guest issues an access to an I/O port that is not emulated.
 This is intended for debug purposes and only applies to the amd64 platform.
-.It Fl f Ar name Ns Cm \&, Ns Oo Cm string Ns No | Ns Cm file Ns Oc Ns Cm \&= Ns Ar data
+.Sm off
+.It Fl f\~ Oo Cm name = Oc Ar name , Cm string = Ar data | Cm file = Ar path
+.Sm on
 Add a fw_cfg file
 .Ar name
 to the fw_cfg interface.
-If a
+If
 .Cm string
 is specified, the fw_cfg file contains the string as data.
-If a
+If
 .Cm file
-is specified, bhyve reads the file and adds the file content as fw_cfg data.
+is specified, bhyve reads the file referenced by
+.Ar path
+and adds the file content as fw_cfg data.
 .It Fl G Xo
 .Sm off
 .Oo Cm w Oc
@@ -297,9 +300,11 @@ Run the VM in
 mode.
 In this mode, a guest reboot does not cause the bhyve process to exit.
 Instead, bhyve will restart the VM.
-Once the bhyve process exits or is killed, the VM will be destroyed automatically.
-.Pp
-.It Fl n Ar id Ns Cm \&, Ns Ar size Ns Cm \&, Ns Ar cpus Ns Op Cm \&, Ns Ar domain_policy
+Once the bhyve process exits or is killed,
+the VM will be destroyed automatically.
+.Sm off
+.It Fl n\~ Ar id , Ar size , Ar cpus Op , Ar domain_policy
+.Sm on
 Configure guest NUMA domains.
 This option applies only to the amd64 platform.
 .Pp
@@ -653,7 +658,7 @@ Multiple rules can be specified, separated by semicolons.
 Note that semicolons must be escaped or quoted to prevent the shell from
 interpreting them.
 The backend will provide DHCP and DNS service to the guest.
-.Ss Block storage device backends:
+.Ss Block storage device backends
 .Bl -bullet
 .Sm off
 .It
@@ -906,19 +911,19 @@ QEMU's fw_cfg interface as well.
 .It
 .Cm ppt Ar N Oo , Ar passthru-device-options Oc
 .It
-.Ns Ar bus Cm \&/ Ar slot Cm \&/ Ar function
+.Ar bus Cm / Ar slot Cm / Ar function
 .Op , Ar passthru-device-options
 .It
-.Cm pci Ar bus Cm : Ar slot Cm : Ns Ar function
+.Cm pci Ar bus : Ar slot : Ns Ar function
 .Op , Ar passthru-device-options
 .El
 .Sm on
 .Pp
-Connect to a PCI device on the host either named ppt
-.Ns Ar N
+Connect to a PCI device on the host either named
+.Cm ppt Ns Ar N
 or at the selector described by
-.Ar slot ,
 .Ar bus ,
+.Ar slot ,
 and
 .Ar function
 numbers.
@@ -979,7 +984,7 @@ resize at present.
 .It
 Emergency write is advertised, but no-op at present.
 .El
-.Ss Virtio input device backends:
+.Ss Virtio input device backends
 .Bl -bullet
 .Sm off
 .It
@@ -1021,7 +1026,7 @@ There are three possible formats:
 .Sm on
 .It
 .Sm off
-.Cm unix: Ar my/unix.sock
+.Cm unix : Ar my/unix.sock
 .Sm on
 .El
 .Pp
@@ -1225,7 +1230,8 @@ Use
 to make
 .Nm
 dump a configuration file representing the used flags and arguments to
-stdout. You can pipe the output into a file to persist the generated settings.
+stdout.
+You can redirect the output into a file to persist the generated settings.
 .Pp
 Make sure to remove the
 .Ar config.dump
